@@ -1,27 +1,37 @@
 // Chart utility functions
+
+// Direct exports for components
+export const formatTime = (timestamp) => {
+  const date = new Date(timestamp);
+  return date.toLocaleString();
+};
+
+export const formatPrice = (price, decimals = 2) => {
+  return parseFloat(price).toFixed(decimals);
+};
+
+export const formatPercentage = (value, decimals = 2) => {
+  return `${(value * 100).toFixed(decimals)}%`;
+};
+
+export const getValueColor = (value, neutral = 0) => {
+  if (value > neutral) return '#26a69a'; // Green
+  if (value < neutral) return '#ef5350'; // Red
+  return '#95a5a6'; // Gray
+};
+
 export const chartUtils = {
   // Format timestamp for chart display
-  formatTime(timestamp) {
-    const date = new Date(timestamp);
-    return date.toLocaleString();
-  },
+  formatTime,
 
   // Format price for display
-  formatPrice(price, decimals = 2) {
-    return parseFloat(price).toFixed(decimals);
-  },
+  formatPrice,
 
   // Format percentage
-  formatPercentage(value, decimals = 2) {
-    return `${(value * 100).toFixed(decimals)}%`;
-  },
+  formatPercentage,
 
   // Calculate color based on value
-  getValueColor(value, neutral = 0) {
-    if (value > neutral) return '#26a69a'; // Green
-    if (value < neutral) return '#ef5350'; // Red
-    return '#95a5a6'; // Gray
-  },
+  getValueColor,
 
   // Generate trade marker
   createTradeMarker(trade, type = 'entry') {

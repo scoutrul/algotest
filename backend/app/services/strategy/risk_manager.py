@@ -332,3 +332,24 @@ class RiskManager:
         except Exception as e:
             logger.error(f"Error calculating risk metrics: {e}")
             return {}
+    
+    def get_info(self) -> Dict[str, Any]:
+        """
+        Get risk manager information.
+        
+        Returns:
+            Dictionary with risk manager details
+        """
+        return {
+            'name': 'Risk Manager',
+            'description': 'Manages position sizing, stop-loss, and take-profit',
+            'version': '1.0.0',
+            'features': [
+                'Dynamic position sizing',
+                'Stop-loss management',
+                'Take-profit optimization',
+                'Risk filtering',
+                'Portfolio risk assessment'
+            ],
+            'config': self.config
+        }

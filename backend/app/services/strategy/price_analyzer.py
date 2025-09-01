@@ -288,3 +288,23 @@ class PriceAnalyzer:
             'avg_momentum': df['momentum'].mean(),
             'trend_direction': df['trend_direction'].iloc[-1] if len(df) > 0 else 0
         }
+    
+    def get_info(self) -> Dict[str, Any]:
+        """
+        Get analyzer information.
+        
+        Returns:
+            Dictionary with analyzer details
+        """
+        return {
+            'name': 'Price Analyzer',
+            'description': 'Analyzes price patterns, trends, and momentum',
+            'version': '1.0.0',
+            'features': [
+                'Multi-timeframe trend analysis',
+                'Momentum calculation',
+                'Volatility measurement',
+                'Technical indicator integration'
+            ],
+            'config': self.config
+        }

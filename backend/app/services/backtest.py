@@ -122,7 +122,7 @@ class BacktestEngine:
             # Create and validate StrategyParams
             strategy_params = StrategyParams(**params_dict)
             
-            logger.info(f"Strategy parameters prepared: {strategy_params.dict()}")
+            logger.info(f"Strategy parameters prepared: {strategy_params.model_dump()}")
             return strategy_params
             
         except Exception as e:

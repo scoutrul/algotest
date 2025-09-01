@@ -211,3 +211,23 @@ class VolumeAnalyzer:
             'avg_volume_ratio': df['volume_ratio'].mean(),
             'max_volume_ratio': df['volume_ratio'].max()
         }
+    
+    def get_info(self) -> Dict[str, Any]:
+        """
+        Get analyzer information.
+        
+        Returns:
+            Dictionary with analyzer details
+        """
+        return {
+            'name': 'Volume Analyzer',
+            'description': 'Analyzes volume patterns and spikes for trading signals',
+            'version': '1.0.0',
+            'features': [
+                'Adaptive volume threshold calculation',
+                'Volume spike detection',
+                'Volume ratio analysis',
+                'Technical indicator integration'
+            ],
+            'config': self.config
+        }

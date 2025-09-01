@@ -377,3 +377,24 @@ class SignalCombiner:
         except Exception as e:
             logger.error(f"Error calculating signal statistics: {e}")
             return {}
+    
+    def get_info(self) -> Dict[str, Any]:
+        """
+        Get signal combiner information.
+        
+        Returns:
+            Dictionary with signal combiner details
+        """
+        return {
+            'name': 'Signal Combiner',
+            'description': 'Combines and weights signals from multiple analyzers',
+            'version': '1.0.0',
+            'features': [
+                'Multi-analyzer signal combination',
+                'Weighted signal scoring',
+                'Signal quality assessment',
+                'Confidence calculation',
+                'Signal filtering'
+            ],
+            'config': self.config
+        }

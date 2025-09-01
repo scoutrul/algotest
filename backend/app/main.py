@@ -9,6 +9,8 @@ import uvicorn
 
 from .config import settings
 from .api.backtest import router as backtest_router
+from .api.performance import router as performance_router
+from .middleware.performance import PerformanceMiddleware
 
 # Configure logging
 logging.basicConfig(
@@ -36,8 +38,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add performance monitoring middleware
+app.add_middleware(PerformanceMiddleware, enable_profiling=True)
+
 # Include routers
 app.include_router(backtest_router)
+app.include_router(performance_router, prefix="/api/v1", tags=["performance"])
 
 @app.get("/")
 async def root():

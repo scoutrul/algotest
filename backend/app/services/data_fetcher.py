@@ -10,6 +10,7 @@ import logging
 
 from ..config import settings
 from ..models.backtest import CandleData
+from .cache import data_cache
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +62,16 @@ class DataFetcher:
                 limit = settings.DEFAULT_CANDLES_LIMIT
             limit = min(limit, settings.MAX_CANDLES_LIMIT)
             
-            # Check cache first
+            # Check Redis cache first
+            cached_data = await data_cache.get_candles(symbol, interval, limit)
+            if cached_data:
+                logger.info(f"Returning cached data from Redis for {symbol} {interval}")
+                return [CandleData(**candle) for candle in cached_data]
+            
+            # Check local cache as fallback
             cache_key = f"{symbol}_{interval}_{limit}"
             if cache_key in self._cache:
-                logger.info(f"Returning cached data for {cache_key}")
+                logger.info(f"Returning cached data from local cache for {cache_key}")
                 return self._cache[cache_key]
             
             # Fetch data from exchange
@@ -82,7 +89,8 @@ class DataFetcher:
             # Convert to CandleData objects
             candles = [CandleData.from_ccxt(candle) for candle in ohlcv]
             
-            # Cache the result
+            # Cache the result in both Redis and local cache
+            await data_cache.set_candles(symbol, interval, limit, [candle.dict() for candle in candles])
             self._cache[cache_key] = candles
             
             logger.info(f"Successfully fetched {len(candles)} candles for {symbol}")

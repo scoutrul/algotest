@@ -1,0 +1,54 @@
+{
+  "data_fetching": {
+    "test_name": "data_fetching",
+    "duration_seconds": 0.0125,
+    "memory_start_mb": 110.55,
+    "memory_end_mb": 110.66,
+    "memory_delta_mb": 0.11,
+    "timestamp": "2025-09-01T23:54:31.079498",
+    "error": "'DataFetcher' object has no attribute 'fetch_ohlcv'",
+    "success": false
+  },
+  "backtest_execution": {
+    "test_name": "backtest_execution",
+    "duration_seconds": 0.0103,
+    "memory_start_mb": 110.66,
+    "memory_end_mb": 110.66,
+    "memory_delta_mb": 0.0,
+    "timestamp": "2025-09-01T23:54:31.089992",
+    "error": "'StrategyParams' object has no attribute 'strategy_params'",
+    "success": false
+  },
+  "api_endpoint_/api/v1/health": {
+    "test_name": "api_endpoint_/api/v1/health",
+    "duration_seconds": 0.0337,
+    "memory_start_mb": 111.89,
+    "memory_end_mb": 113.66,
+    "memory_delta_mb": 1.77,
+    "timestamp": "2025-09-01T23:54:31.215001",
+    "endpoint": "/api/v1/health",
+    "iterations": 5,
+    "successes": 5,
+    "success_rate": 1.0,
+    "avg_duration": 0.0048,
+    "min_duration": 0.0021,
+    "max_duration": 0.0131,
+    "median_duration": 0.0024
+  },
+  "api_endpoint_/api/v1/backtest": {
+    "test_name": "api_endpoint_/api/v1/backtest",
+    "duration_seconds": 10.2428,
+    "memory_start_mb": 113.66,
+    "memory_end_mb": 35.97,
+    "memory_delta_mb": -77.69,
+    "timestamp": "2025-09-01T23:54:41.458324",
+    "endpoint": "/api/v1/backtest",
+    "iterations": 3,
+    "successes": 0,
+    "success_rate": 0.0,
+    "avg_duration": 0.2175,
+    "min_duration": 0.2175,
+    "max_duration": 0.2175,
+    "median_duration": 0.2175
+  }
+}

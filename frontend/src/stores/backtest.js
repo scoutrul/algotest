@@ -1,6 +1,5 @@
 // Backtest state management store
 import { writable } from 'svelte/store';
-import { apiClient } from '../utils/api.js';
 
 // Initial state
 const initialState = {
@@ -35,6 +34,8 @@ function createBacktestStore() {
       update(state => ({ ...state, loading: true, error: null }));
       
       try {
+        // Dynamic import to avoid circular dependencies
+        const { apiClient } = await import('../utils/api.js');
         const result = await apiClient.runBacktest(params);
         
         update(state => ({

@@ -27,11 +27,17 @@
   }
 
   function handleQuickBacktest() {
+    // Ensure we have valid values
+    const symbol = selectedSymbol && selectedSymbol !== 'undefined' ? selectedSymbol : 'BTC/USDT';
+    const interval = selectedInterval && selectedInterval !== 'undefined' ? selectedInterval : '15m';
+    
     const params = {
-      symbol: selectedSymbol,
-      interval: selectedInterval,
+      symbol,
+      interval,
       ...$configStore.strategyParams
     };
+    
+    console.log('Running backtest with params:', params);
     dispatch('backtest', params);
   }
 </script>

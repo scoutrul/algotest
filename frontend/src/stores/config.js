@@ -1,6 +1,5 @@
 // Configuration state management store
 import { writable } from 'svelte/store';
-import { apiClient } from '../utils/api.js';
 
 // Initial state
 const initialState = {
@@ -33,6 +32,8 @@ function createConfigStore() {
       update(state => ({ ...state, loading: true, error: null }));
       
       try {
+        // Dynamic import to avoid circular dependencies
+        const { apiClient } = await import('../utils/api.js');
         const config = await apiClient.getConfig();
         
         update(state => ({
@@ -58,6 +59,8 @@ function createConfigStore() {
     // Load available symbols
     loadSymbols: async () => {
       try {
+        // Dynamic import to avoid circular dependencies
+        const { apiClient } = await import('../utils/api.js');
         const response = await apiClient.getSymbols();
         
         update(state => ({
@@ -67,17 +70,22 @@ function createConfigStore() {
         
         return response.symbols;
       } catch (error) {
+        console.warn('Failed to load symbols from API, using defaults:', error);
+        // Fallback to default symbols
+        const defaultSymbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT'];
         update(state => ({
           ...state,
-          error: error.message || 'Failed to load symbols'
+          availableSymbols: defaultSymbols
         }));
-        throw error;
+        return defaultSymbols;
       }
     },
     
     // Load available intervals
     loadIntervals: async () => {
       try {
+        // Dynamic import to avoid circular dependencies
+        const { apiClient } = await import('../utils/api.js');
         const response = await apiClient.getIntervals();
         
         update(state => ({
@@ -87,11 +95,14 @@ function createConfigStore() {
         
         return response.intervals;
       } catch (error) {
+        console.warn('Failed to load intervals from API, using defaults:', error);
+        // Fallback to default intervals
+        const defaultIntervals = ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d'];
         update(state => ({
           ...state,
-          error: error.message || 'Failed to load intervals'
+          availableIntervals: defaultIntervals
         }));
-        throw error;
+        return defaultIntervals;
       }
     },
     

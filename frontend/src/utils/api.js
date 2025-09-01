@@ -58,6 +58,14 @@ class ApiClient {
   async runBacktestGet(params) {
     const queryParams = new URLSearchParams();
     
+    // Validate required parameters
+    if (!params.symbol || params.symbol === 'undefined') {
+      throw new Error('Symbol is required');
+    }
+    if (!params.interval || params.interval === 'undefined') {
+      throw new Error('Interval is required');
+    }
+    
     // Add required parameters
     queryParams.append('symbol', params.symbol);
     queryParams.append('interval', params.interval);

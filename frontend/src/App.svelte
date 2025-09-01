@@ -21,11 +21,14 @@
 
   onMount(async () => {
     try {
-      // Load initial configuration
-      await configStore.loadConfig();
-      await configStore.loadSymbols();
-      await configStore.loadIntervals();
+      // Load initial configuration with error handling
+      await Promise.allSettled([
+        configStore.loadConfig(),
+        configStore.loadSymbols(),
+        configStore.loadIntervals()
+      ]);
     } catch (err) {
+      console.error('Error loading configuration:', err);
       error = err.message;
     }
   });
@@ -36,7 +39,15 @@
     error = null;
     
     try {
-      await backtestStore.runBacktest(params);
+      // Ensure we have valid symbol and interval
+      const backtestParams = {
+        symbol: config.selectedSymbol || 'BTC/USDT',
+        interval: config.selectedInterval || '15m',
+        ...config.strategyParams,
+        ...params
+      };
+      
+      await backtestStore.runBacktest(backtestParams);
     } catch (err) {
       error = err.message;
     } finally {

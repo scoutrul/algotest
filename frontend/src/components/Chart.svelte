@@ -39,6 +39,7 @@
   let activeBackfillCount = 0;
   const MAX_CONCURRENT_BACKFILLS = 2;
   let initialLoadComplete = false;
+  let lastTriggerTime = 0;
   const intervalToSec = {
     '1m': 60, '15m': 900, '1h': 3600, '4h': 14400, '12h': 43200,
     '1d': 86400, '1w': 604800, '1M': 2592000
@@ -403,7 +404,18 @@
     console.log('Setting up backfill for', symbol, interval);
 
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-      if (!range || reachedHistoryStart) return;
+      console.log('📊 Viewport changed:', {
+        from: range.from,
+        to: range.to,
+        reachedHistoryStart,
+        initialLoadComplete,
+        triggerActivated: false
+      });
+
+      if (!range || reachedHistoryStart) {
+        console.log('Viewport change ignored:', { noRange: !range, reachedHistoryStart });
+        return;
+      }
 
       // Debug logging
       console.log('Backfill check:', {
@@ -414,47 +426,145 @@
         isLoading: isLoadingMore
       });
 
-      // Improved trigger: load when less than 10% of screen width remains on the left
+      // Improved trigger: load when less than 20% of screen width remains on the left
       const windowWidth = range.to - range.from;
-      const triggerThreshold = range.from + (windowWidth * 0.1); // Trigger when < 10% remains
+      const triggerThreshold = range.from + (windowWidth * 0.20); // Trigger when < 20% remains
+
+      // Alternative trigger: check if we're close to placeholders (more reliable)
+      const visibleStartTime = Math.floor(range.from);
+      const oldestCandleTime = candles?.length ? Math.floor(new Date(candles[0].timestamp).getTime() / 1000) : null;
+      const hasPlaceholdersNearby = oldestCandleTime && (visibleStartTime - oldestCandleTime) < 50; // Within 50 seconds of oldest data
+
+      // Debug: show if we actually have placeholders
+      const hasVisiblePlaceholders = leftPlaceholders.some(p => p.time >= visibleStartTime && p.time <= range.to);
 
       console.log('Trigger check:', {
         rangeFrom: range.from,
         triggerThreshold,
         shouldTrigger: range.from < triggerThreshold,
-        triggerPercent: '10%'
+        visibleStartTime,
+        oldestCandleTime,
+        hasPlaceholdersNearby,
+        hasVisiblePlaceholders,
+        placeholdersCount: leftPlaceholders.length,
+        triggerPercent: '20%'
       });
 
-      if (range.from >= triggerThreshold) return;
+      // Simple trigger: just check if we're close to the left edge
+      const shouldTriggerBackfill = range.from < triggerThreshold;
 
-      // Prevent too many concurrent backfill requests
-      if (activeBackfillCount >= MAX_CONCURRENT_BACKFILLS) {
-        console.log('Backfill limit reached, skipping request. Active:', activeBackfillCount);
+      console.log('Simple trigger decision:', {
+        shouldTriggerBackfill,
+        rangeFrom: range.from,
+        triggerThreshold,
+        difference: triggerThreshold - range.from, // How close we are to trigger
+        windowWidth: range.to - range.from,
+        remainingPercent: ((triggerThreshold - range.from) / (range.to - range.from)) * 100,
+        hasVisiblePlaceholders,
+        distanceFromOldest: oldestCandleTime ? oldestCandleTime - visibleStartTime : null
+      });
+
+      if (!shouldTriggerBackfill) {
+        console.log('❌ Backfill not triggered - not close enough to edge');
         return;
       }
 
-      // debounce rapid events (increased from 120ms to 500ms to reduce request frequency)
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(async () => {
+      // Prevent too many concurrent backfill requests
+      if (activeBackfillCount >= MAX_CONCURRENT_BACKFILLS) {
+        console.log('❌ Backfill limit reached, skipping request. Active:', activeBackfillCount, 'Max:', MAX_CONCURRENT_BACKFILLS);
+        return;
+      }
+
+      // Prevent overlapping with existing requests
+      if (isLoadingMore || pendingBackfill) {
+        console.log('❌ Backfill already in progress, skipping request');
+        return;
+      }
+
+      console.log('✅ All checks passed, proceeding with backfill request');
+
+      const now = Date.now();
+      const timeSinceLastTrigger = now - lastTriggerTime;
+
+      console.log('🎯 TRIGGER ACTIVATED! Starting backfill request...', {
+        timeSinceLastTrigger,
+        lastTriggerTime: new Date(lastTriggerTime).toLocaleTimeString()
+      });
+
+      // Prevent triggers too close together (minimum 500ms between triggers)
+      if (timeSinceLastTrigger < 500) {
+        console.log('⏳ Trigger too soon, skipping...');
+        return;
+      }
+
+      lastTriggerTime = now;
+
+      // Execute backfill immediately without debounce for testing
+      console.log('🚀 EXECUTING BACKFILL IMMEDIATELY...');
+      
+      (async () => {
+        console.log('⏰ Debounce timer fired, executing backfill...');
+        console.log('Backfill conditions:', {
+          isLoadingMore,
+          pendingBackfill: !!pendingBackfill,
+          activeBackfillCount,
+          candlesLength: candles?.length || 0,
+          MAX_CONCURRENT_BACKFILLS
+        });
+
         try {
-          if (isLoadingMore || pendingBackfill) return;
+          if (isLoadingMore || pendingBackfill) {
+            console.log('❌ Skipping backfill due to active request');
+            console.log('Resetting debounce timer for next attempt...');
+            // Reset timer to try again later
+            debounceTimer = setTimeout(() => {
+              console.log('🔄 Retrying backfill after skip...');
+              // Recursive call to retry
+              if (!isLoadingMore && !pendingBackfill) {
+                performAutomaticBackfill(1);
+              }
+            }, 1000);
+            return;
+          }
+          console.log('✅ Backfill conditions passed, proceeding...');
 
           const cursor = backfillCursor || (candles.length ? candles[0].timestamp : null);
-          if (!cursor) return;
+          console.log('Cursor check:', {
+            cursor,
+            backfillCursor,
+            oldestCandleTimestamp: candles?.[0]?.timestamp,
+            lastRequestedCursor
+          });
+
+          if (!cursor) {
+            console.log('No cursor available, skipping backfill');
+            return;
+          }
 
           // don't duplicate request for same cursor
-          if (lastRequestedCursor === cursor) return;
+          if (lastRequestedCursor === cursor) {
+            console.log('Duplicate cursor detected, skipping backfill');
+            return;
+          }
 
+          console.log('🚀 About to start backfill request...');
           isLoadingMore = true;
           lastRequestedCursor = cursor;
           activeBackfillCount++;
-          console.log(`Starting backfill request ${activeBackfillCount}/${MAX_CONCURRENT_BACKFILLS} for cursor:`, cursor);
+          console.log(`✅ Starting backfill request ${activeBackfillCount}/${MAX_CONCURRENT_BACKFILLS} for cursor:`, cursor);
 
           // before requesting, ensure we already have a left buffer so viewport doesn't move
           ensureLeftBuffer(500);
           updateChart({ preserveViewport: true });
 
           // fetch older data using end_time (get data BEFORE cursor)
+          console.log('🚀 Making backfill API request:', {
+            symbol,
+            interval,
+            end_time: cursor,
+            limit: 1000
+          });
+
           pendingBackfill = apiClient.getCandles({
             symbol,
             interval,
@@ -462,8 +572,17 @@
             limit: 1000
           });
 
+          console.log('📡 API call initiated, waiting for response...');
+
           const older = await pendingBackfill;
           pendingBackfill = null;
+
+          console.log('📥 API response received:', {
+            received: older?.length || 0,
+            cursor: cursor,
+            oldestCurrent: candles?.[0]?.timestamp,
+            newestCurrent: candles?.[candles.length - 1]?.timestamp
+          });
 
           if (older && older.length) {
             // replace matching placeholders by time
@@ -489,11 +608,12 @@
         } catch (e) {
           console.warn('Backfill error:', e);
         } finally {
+          console.log('🏁 Backfill request finishing, resetting flags...');
           isLoadingMore = false;
           activeBackfillCount = Math.max(0, activeBackfillCount - 1);
-          console.log(`Backfill request completed. Active requests: ${activeBackfillCount}/${MAX_CONCURRENT_BACKFILLS}`);
+          console.log(`✅ Backfill request completed. Active requests: ${activeBackfillCount}/${MAX_CONCURRENT_BACKFILLS}`);
         }
-      }, 500);
+      })();
     });
   }
 
@@ -504,8 +624,10 @@
     activeBackfillCount = 0; // Reset backfill counter on interval change
     reachedHistoryStart = false;
     lastRequestedCursor = null;
+    backfillCursor = null; // Reset backfill cursor too
     pendingBackfill = null;
     initialLoadComplete = false;
+    lastTriggerTime = 0; // Reset trigger timing
     if (debounceTimer) {
       clearTimeout(debounceTimer);
       debounceTimer = null;

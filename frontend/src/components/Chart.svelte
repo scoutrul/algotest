@@ -1,8 +1,9 @@
 <!-- Trading Chart Component with TradingView Lightweight Charts -->
 <script>
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
-  import { createChart } from 'lightweight-charts';
   import { chartUtils } from '../utils/chart.js';
+  import { apiClient } from '../utils/api.js';
+  let createChartFn = null;
 
   // Props
   export let candles = [];
@@ -12,28 +13,93 @@
   export let fullscreen = false;
   export let loading = false;
 
+  // Export loading states for parent components
+  export let isBackfilling = false;
+
   // Component state
   let chartContainer;
   let chart;
   let candlestickSeries;
   let tradeMarkers = [];
   let resizeObserver;
+  let initialHeight = 0;
+  let lastWidth = 0;
+  let isLoadingMore = false;
+
+  // Sync internal loading state with exported prop
+  $: isBackfilling = isLoadingMore;
+  let backfillCursor = null;
+  let reachedHistoryStart = false;
+  let lastRequestedCursor = null;
+  let pendingBackfill = null;
+  let debounceTimer = null;
+  let leftPlaceholders = [];
+
+  // Limit concurrent backfill requests to prevent cascade
+  let activeBackfillCount = 0;
+  const MAX_CONCURRENT_BACKFILLS = 2;
+  let initialLoadComplete = false;
+  const intervalToSec = {
+    '1m': 60, '15m': 900, '1h': 3600, '4h': 14400, '12h': 43200,
+    '1d': 86400, '1w': 604800, '1M': 2592000
+  };
 
   // Event dispatcher
   const dispatch = createEventDispatcher();
 
   // Reactive statements
   $: if (chart && candles.length > 0) {
-    updateChart();
+    console.log('Reactive updateChart triggered, candles:', candles.length, 'activeBackfillCount:', activeBackfillCount);
+    updateChart({ preserveViewport: true });
   }
 
   $: if (chart && trades.length > 0) {
     updateTradeMarkers();
   }
 
-  onMount(() => {
-    initializeChart();
-    setupResizeObserver();
+  onMount(async () => {
+    try {
+      if (typeof window === 'undefined') return;
+      const mod = await import('lightweight-charts');
+      createChartFn = mod.createChart;
+      initializeChart();
+      setupResizeObserver();
+      setupBackfill();
+      // initial load if no candles yet
+      console.log('Chart init: checking candles', {
+        candlesExists: !!candles,
+        candlesLength: candles?.length || 0
+      });
+
+      if (!candles || candles.length === 0) {
+        const nowBatch = await apiClient.getCandles({ symbol, interval, limit: 1000 });
+        if (nowBatch && nowBatch.length) {
+          candles = nowBatch;
+          backfillCursor = candles[0].timestamp;
+          ensureLeftBuffer(500);
+          updateChart({ preserveViewport: false });
+          initialLoadComplete = true;
+          console.log('Initial load complete, starting automatic backfill');
+
+          // Start automatic backfill with 1-2 historical batches
+          console.log('Setting timeout for automatic backfill...');
+          setTimeout(() => {
+            console.log('Timeout triggered, calling performAutomaticBackfill...');
+            performAutomaticBackfill(2);
+          }, 100);
+        }
+      } else {
+        initialLoadComplete = true;
+        console.log('Data already exists, setting timeout for automatic backfill...');
+        // If data already exists, still do automatic backfill
+        setTimeout(() => {
+          console.log('Timeout triggered for existing data, calling performAutomaticBackfill...');
+          performAutomaticBackfill(2);
+        }, 100);
+      }
+    } catch (e) {
+      console.error('Chart init failed:', e);
+    }
   });
 
   onDestroy(() => {
@@ -48,8 +114,9 @@
   function initializeChart() {
     if (!chartContainer) return;
 
+    if (!createChartFn) return;
     // Create chart
-    chart = createChart(chartContainer, {
+    chart = createChartFn(chartContainer, {
       width: chartContainer.clientWidth,
       height: chartContainer.clientHeight,
       layout: {
@@ -84,9 +151,11 @@
     });
 
     // Handle resize
+    // Lock initial height to prevent infinite growth on reflows
+    if (!initialHeight) initialHeight = chartContainer.clientHeight || 400;
     chart.applyOptions({
-      width: chartContainer.clientWidth,
-      height: chartContainer.clientHeight,
+      width: chartContainer.clientWidth || 800,
+      height: initialHeight,
     });
   }
 
@@ -94,32 +163,108 @@
     if (!chartContainer) return;
 
     resizeObserver = new ResizeObserver(entries => {
-      if (chart && entries.length > 0) {
-        const { width, height } = entries[0].contentRect;
-        chart.applyOptions({ width, height });
-      }
+      if (!chart || entries.length === 0) return;
+      const { width, height } = entries[0].contentRect;
+      if (width === lastWidth) return; // avoid vertical growth loops
+      lastWidth = width;
+      chart.applyOptions({ width, height: initialHeight || height });
     });
 
     resizeObserver.observe(chartContainer);
   }
 
-  function updateChart() {
-    if (!candlestickSeries || !candles.length) return;
+  function ensureLeftBuffer(count = 500) {
+    if (!candles || candles.length === 0) return;
+    const sec = intervalToSec[interval] || 900;
+    const oldest = Math.floor(new Date(candles[0].timestamp).getTime() / 1000);
+
+    // Get the oldest candle to base placeholder prices on (for seamless connection)
+    const oldestCandle = candles[0];
+    if (!oldestCandle) return;
+
+    // Use the open price of the oldest candle for flat placeholders
+    const flatPrice = oldestCandle.open;
+
+    // Get existing times from both real candles and placeholders to avoid overlaps
+    const existingTimes = new Set();
+    (candles || []).forEach(candle => {
+      existingTimes.add(Math.floor(new Date(candle.timestamp).getTime() / 1000));
+    });
+    leftPlaceholders.forEach(p => {
+      existingTimes.add(p.time);
+    });
+
+    const needed = [];
+    for (let i = 1; i <= count; i++) {
+      const time = oldest - i * sec;
+      if (!existingTimes.has(time)) {
+        // Create flat candles with the same price for all OHLC values
+        needed.push({
+          time,
+          open: flatPrice,
+          high: flatPrice,
+          low: flatPrice,
+          close: flatPrice
+        });
+      }
+    }
+
+    // Add new placeholders
+    leftPlaceholders.push(...needed);
+    leftPlaceholders.sort((a,b) => a.time - b.time);
+
+    // cap buffer length
+    if (leftPlaceholders.length > 5000) {
+      leftPlaceholders = leftPlaceholders.slice(-5000);
+    }
+  }
+
+  function updateChart({ preserveViewport = false } = {}) {
+    if (!candlestickSeries) return;
 
     // Convert candles to chart format
-    const chartData = candles.map(candle => ({
+    const realData = (candles || []).map(candle => ({
       time: Math.floor(new Date(candle.timestamp).getTime() / 1000),
       open: candle.open,
       high: candle.high,
       low: candle.low,
       close: candle.close,
+    })).sort((a,b) => a.time - b.time);
+
+    // Update backfill cursor to oldest candle
+    backfillCursor = candles && candles.length ? candles[0].timestamp : backfillCursor;
+
+    // Create loading placeholders with special styling during backfill
+    const loadingPlaceholders = leftPlaceholders.map(placeholder => ({
+      ...placeholder,
+      // Add loading indicator styling during backfill
+      ...(isLoadingMore ? {
+        loading: true
+      } : {})
     }));
 
-    // Update candlestick series
+    // Compose placeholders + real data, sort and deduplicate
+    const combinedData = [...loadingPlaceholders, ...realData];
+
+    // Sort by time ascending
+    combinedData.sort((a, b) => a.time - b.time);
+
+    // Remove duplicates by time (keep the one with more data - real data preferred)
+    const seenTimes = new Set();
+    const chartData = combinedData.filter(item => {
+      if (seenTimes.has(item.time)) {
+        return false;
+      }
+      seenTimes.add(item.time);
+      return true;
+    });
+
+    // Update candlestick series without changing viewport
     candlestickSeries.setData(chartData);
 
-    // Fit content
-    chart.timeScale().fitContent();
+    if (!preserveViewport && realData.length) {
+      chart.timeScale().fitContent();
+    }
   }
 
   function updateTradeMarkers() {
@@ -167,6 +312,206 @@
     candlestickSeries.setMarkers(markers);
   }
 
+  async function performAutomaticBackfill(maxRequests = 2) {
+    console.log('performAutomaticBackfill called with:', {
+      chart: !!chart,
+      initialLoadComplete,
+      reachedHistoryStart,
+      candlesLength: candles?.length || 0,
+      backfillCursor,
+      maxRequests
+    });
+
+    if (!chart || reachedHistoryStart) {
+      console.log('performAutomaticBackfill: early return due to conditions');
+      return;
+    }
+
+    console.log(`Starting automatic backfill with max ${maxRequests} requests`);
+
+    for (let i = 0; i < maxRequests; i++) {
+      if (activeBackfillCount >= MAX_CONCURRENT_BACKFILLS || reachedHistoryStart) {
+        console.log(`Automatic backfill stopped at request ${i + 1}/${maxRequests}`);
+        break;
+      }
+
+      const cursor = backfillCursor || (candles.length ? candles[0].timestamp : null);
+      if (!cursor) break;
+
+      // Don't duplicate request for same cursor
+      if (lastRequestedCursor === cursor) break;
+
+      try {
+        console.log(`Automatic backfill request ${i + 1}/${maxRequests} for cursor:`, cursor);
+
+        activeBackfillCount++;
+        isLoadingMore = true;
+        lastRequestedCursor = cursor;
+
+        // Fetch older data using end_time (get data BEFORE cursor)
+        const older = await apiClient.getCandles({
+          symbol,
+          interval,
+          end_time: cursor,
+          limit: 1000
+        });
+
+        if (older && older.length) {
+          // Replace matching placeholders by time
+          const olderTimes = new Set(older.map(c => Math.floor(new Date(c.timestamp).getTime() / 1000)));
+          leftPlaceholders = leftPlaceholders.filter(p => !olderTimes.has(p.time));
+
+          // Prepend new real candles (filter out duplicates)
+          const existing = new Set((candles || []).map(c => new Date(c.timestamp).getTime()));
+          const onlyNew = older.filter(c => !existing.has(new Date(c.timestamp).getTime()));
+
+          if (onlyNew.length) {
+            console.log(`Automatic backfill: adding ${onlyNew.length} candles from batch ${i + 1}`);
+            candles = [...onlyNew, ...(candles || [])].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+            backfillCursor = candles[0].timestamp;
+            ensureLeftBuffer(500);
+            updateChart({ preserveViewport: true });
+          } else {
+            // Nothing new, move cursor one interval back
+            const ts = new Date(cursor).getTime() - (intervalToSec[interval] || 900) * 1000;
+            backfillCursor = new Date(ts).toISOString();
+          }
+        } else {
+          reachedHistoryStart = true;
+          console.log('Automatic backfill: reached history start');
+          break;
+        }
+
+        // Small delay between requests to prevent overwhelming the server
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+      } catch (e) {
+        console.warn(`Automatic backfill error on request ${i + 1}:`, e);
+        break;
+      } finally {
+        isLoadingMore = false;
+        activeBackfillCount = Math.max(0, activeBackfillCount - 1);
+      }
+    }
+
+    console.log(`Automatic backfill completed. Total candles: ${candles.length}`);
+  }
+
+  function setupBackfill() {
+    if (!chart) return;
+
+    console.log('Setting up backfill for', symbol, interval);
+
+    chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      if (!range || reachedHistoryStart) return;
+
+      // Debug logging
+      console.log('Backfill check:', {
+        from: range.from,
+        to: range.to,
+        windowWidth: range.to - range.from,
+        candlesCount: candles?.length || 0,
+        isLoading: isLoadingMore
+      });
+
+      // Improved trigger: load when less than 10% of screen width remains on the left
+      const windowWidth = range.to - range.from;
+      const triggerThreshold = range.from + (windowWidth * 0.1); // Trigger when < 10% remains
+
+      console.log('Trigger check:', {
+        rangeFrom: range.from,
+        triggerThreshold,
+        shouldTrigger: range.from < triggerThreshold,
+        triggerPercent: '10%'
+      });
+
+      if (range.from >= triggerThreshold) return;
+
+      // Prevent too many concurrent backfill requests
+      if (activeBackfillCount >= MAX_CONCURRENT_BACKFILLS) {
+        console.log('Backfill limit reached, skipping request. Active:', activeBackfillCount);
+        return;
+      }
+
+      // debounce rapid events (increased from 120ms to 500ms to reduce request frequency)
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(async () => {
+        try {
+          if (isLoadingMore || pendingBackfill) return;
+
+          const cursor = backfillCursor || (candles.length ? candles[0].timestamp : null);
+          if (!cursor) return;
+
+          // don't duplicate request for same cursor
+          if (lastRequestedCursor === cursor) return;
+
+          isLoadingMore = true;
+          lastRequestedCursor = cursor;
+          activeBackfillCount++;
+          console.log(`Starting backfill request ${activeBackfillCount}/${MAX_CONCURRENT_BACKFILLS} for cursor:`, cursor);
+
+          // before requesting, ensure we already have a left buffer so viewport doesn't move
+          ensureLeftBuffer(500);
+          updateChart({ preserveViewport: true });
+
+          // fetch older data using end_time (get data BEFORE cursor)
+          pendingBackfill = apiClient.getCandles({
+            symbol,
+            interval,
+            end_time: cursor,
+            limit: 1000
+          });
+
+          const older = await pendingBackfill;
+          pendingBackfill = null;
+
+          if (older && older.length) {
+            // replace matching placeholders by time
+            const olderTimes = new Set(older.map(c => Math.floor(new Date(c.timestamp).getTime() / 1000)));
+            leftPlaceholders = leftPlaceholders.filter(p => !olderTimes.has(p.time));
+
+            // prepend new real candles (filter out duplicates)
+            const existing = new Set((candles || []).map(c => new Date(c.timestamp).getTime()));
+            const onlyNew = older.filter(c => !existing.has(new Date(c.timestamp).getTime()));
+
+            if (onlyNew.length) {
+              candles = [...onlyNew, ...(candles || [])].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+              backfillCursor = candles[0].timestamp;
+              updateChart({ preserveViewport: true });
+            } else {
+              // nothing new, move cursor one interval back for next attempt
+              const ts = new Date(cursor).getTime() - (intervalToSec[interval] || 900) * 1000;
+              backfillCursor = new Date(ts).toISOString();
+            }
+          } else {
+            reachedHistoryStart = true;
+          }
+        } catch (e) {
+          console.warn('Backfill error:', e);
+        } finally {
+          isLoadingMore = false;
+          activeBackfillCount = Math.max(0, activeBackfillCount - 1);
+          console.log(`Backfill request completed. Active requests: ${activeBackfillCount}/${MAX_CONCURRENT_BACKFILLS}`);
+        }
+      }, 500);
+    });
+  }
+
+  // React to interval change: reset buffers and reload
+  $: if (chart && interval) {
+    // whenever interval changes externally, reload data
+    // (simple heuristic: if candles exist and their spacing mismatches selected interval)
+    activeBackfillCount = 0; // Reset backfill counter on interval change
+    reachedHistoryStart = false;
+    lastRequestedCursor = null;
+    pendingBackfill = null;
+    initialLoadComplete = false;
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+  }
+
   function toggleFullscreen() {
     fullscreen = !fullscreen;
     dispatch('toggleFullscreen', { fullscreen });
@@ -198,7 +543,15 @@
     <div class="chart-title">
       <h3>{symbol} - {interval}</h3>
       {#if loading}
-        <span class="loading-indicator">Loading...</span>
+        <span class="loading-indicator">
+          <div class="spinner"></div>
+          Loading chart data...
+        </span>
+      {:else if isBackfilling}
+        <span class="loading-indicator backfilling">
+          <div class="spinner"></div>
+          Loading historical data...
+        </span>
       {/if}
     </div>
     <div class="chart-controls">
@@ -220,7 +573,15 @@
 
   <!-- Chart wrapper -->
   <div class="chart-wrapper" bind:this={chartContainer}>
-    {#if !candles.length && !loading}
+    {#if !candles.length && loading}
+      <div class="chart-loading-overlay">
+        <div class="loading-content">
+          <div class="spinner-large"></div>
+          <h4>Loading Chart Data</h4>
+          <p>Fetching latest candles from exchange...</p>
+        </div>
+      </div>
+    {:else if !candles.length && !loading}
       <div class="chart-placeholder">
         <div class="placeholder-content">
           <svg width="64" height="64" viewBox="0 0 24 24" fill="currentColor" opacity="0.3">
@@ -228,6 +589,16 @@
           </svg>
           <h4>No Data Available</h4>
           <p>Run a backtest to see the chart</p>
+        </div>
+      </div>
+    {/if}
+
+    <!-- Backfilling indicator overlay -->
+    {#if isBackfilling && candles.length > 0}
+      <div class="backfill-indicator">
+        <div class="backfill-content">
+          <div class="spinner-small"></div>
+          <span>Loading more historical data...</span>
         </div>
       </div>
     {/if}
@@ -261,6 +632,7 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+    max-height: 100vh;
     background: white;
   }
 
@@ -343,6 +715,8 @@
     flex: 1;
     position: relative;
     min-height: 400px;
+    height: 100%;
+    overflow: hidden;
   }
 
   .chart-placeholder {
@@ -406,6 +780,125 @@
     background: #ef5350;
   }
 
+  /* Loading indicators */
+  .loading-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #3498db;
+    font-size: 0.875rem;
+    font-weight: 500;
+    margin-left: 1rem;
+  }
+
+  .loading-indicator.backfilling {
+    color: #f39c12;
+  }
+
+  .spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #e0e0e0;
+    border-top: 2px solid currentColor;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  /* Chart loading overlay */
+  .chart-loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  }
+
+  .loading-content {
+    text-align: center;
+    color: #666;
+  }
+
+  .loading-content h4 {
+    margin: 1rem 0 0.5rem;
+    color: #333;
+    font-weight: 600;
+  }
+
+  .loading-content p {
+    margin: 0;
+    color: #999;
+    font-size: 0.875rem;
+  }
+
+  .spinner-large {
+    width: 48px;
+    height: 48px;
+    border: 4px solid #e0e0e0;
+    border-top: 4px solid #3498db;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 1rem;
+  }
+
+  /* Backfilling indicator */
+  .backfill-indicator {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    z-index: 20;
+    backdrop-filter: blur(4px);
+  }
+
+  .backfill-content {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: #f39c12;
+    font-weight: 500;
+  }
+
+  .spinner-small {
+    width: 14px;
+    height: 14px;
+    border: 2px solid #e0e0e0;
+    border-top: 2px solid #f39c12;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  /* Placeholder candles styling */
+  .placeholder-candle {
+    opacity: 0.6;
+    border-style: dashed !important;
+    border-width: 1px !important;
+  }
+
+  .placeholder-candle.loading {
+    opacity: 0.4;
+    animation: placeholder-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes placeholder-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 0.6; }
+  }
+
   /* Responsive adjustments */
   @media (max-width: 768px) {
     .chart-header {
@@ -420,6 +913,16 @@
 
     .chart-legend {
       justify-content: center;
+    }
+
+    .backfill-indicator {
+      top: 5px;
+      right: 5px;
+      padding: 0.25rem 0.5rem;
+    }
+
+    .backfill-content {
+      font-size: 0.75rem;
     }
   }
 </style>

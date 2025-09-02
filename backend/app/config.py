@@ -21,8 +21,12 @@ class Settings:
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
         "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173"
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://127.0.0.1:5175"
     ]
     
     # Binance Configuration
@@ -55,13 +59,17 @@ class Settings:
     
     # Supported Intervals
     SUPPORTED_INTERVALS: List[str] = [
-        "1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"
+        "1m", "15m", "1h", "4h", "12h", "1d", "1w", "1M"
     ]
     
     # Data Limits
-    MAX_CANDLES_LIMIT: int = 1000
-    DEFAULT_CANDLES_LIMIT: int = 500
+    MAX_CANDLES_LIMIT: int = 10000
+    DEFAULT_CANDLES_LIMIT: int = 1000
     
+    # Database Configuration
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./backtest.db")
+    DATABASE_ECHO: bool = os.getenv("DATABASE_ECHO", "False").lower() == "true"
+
     # Redis Configuration
     REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))

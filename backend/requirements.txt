@@ -25,6 +25,10 @@ python-multipart==0.0.6
 psutil==5.9.6
 memory-profiler==0.61.0
 
+# Database
+sqlalchemy==2.0.23
+alembic==1.13.1
+
 # Caching
 redis==5.0.1
 

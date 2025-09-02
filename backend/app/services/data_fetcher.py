@@ -11,6 +11,7 @@ import logging
 from ..config import settings
 from ..models.backtest import CandleData
 from .cache import data_cache
+from .database import db_service
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,11 @@ class DataFetcher:
             'secret': '',
             'sandbox': False,
             'enableRateLimit': True,
-            'rateLimit': 1000,  # 1 second between requests
+            'rateLimit': 200,  # Reduced from 1000ms to 200ms for faster requests
+            'options': {
+                'adjustForTimeDifference': False,  # Skip time adjustment for faster responses
+                'recvWindow': 10000,
+            }
         })
         
         # Cache for frequently requested data
@@ -62,13 +67,22 @@ class DataFetcher:
                 limit = settings.DEFAULT_CANDLES_LIMIT
             limit = min(limit, settings.MAX_CANDLES_LIMIT)
             
-            # Check Redis cache first
+            # 1. Try to get data from database first
+            db_candles = await db_service.get_candles(symbol, interval, limit)
+            if db_candles and len(db_candles) > 0:
+                logger.info(f"Returning {len(db_candles)} candles from database for {symbol} {interval}")
+                return db_candles
+
+            # 2. Check Redis cache as fallback
             cached_data = await data_cache.get_candles(symbol, interval, limit)
             if cached_data:
                 logger.info(f"Returning cached data from Redis for {symbol} {interval}")
-                return [CandleData(**candle) for candle in cached_data]
-            
-            # Check local cache as fallback
+                candles = [CandleData(**candle) for candle in cached_data]
+                # Save to database for future use
+                await db_service.save_candles(symbol, interval, candles)
+                return candles
+
+            # 3. Check local cache as last resort
             cache_key = f"{symbol}_{interval}_{limit}"
             if cache_key in self._cache:
                 logger.info(f"Returning cached data from local cache for {cache_key}")
@@ -88,8 +102,13 @@ class DataFetcher:
             
             # Convert to CandleData objects
             candles = [CandleData.from_ccxt(candle) for candle in ohlcv]
-            
-            # Cache the result in both Redis and local cache
+
+            # 5. Save to database for future requests
+            saved_count = await db_service.save_candles(symbol, interval, candles)
+            if saved_count > 0:
+                logger.info(f"Saved {saved_count} candles to database for {symbol} {interval}")
+
+            # 6. Cache the result in Redis and local cache
             await data_cache.set_candles(symbol, interval, limit, [candle.model_dump() for candle in candles])
             self._cache[cache_key] = candles
             
@@ -128,31 +147,87 @@ class DataFetcher:
             List of CandleData objects
         """
         try:
-            # If no start_time provided, calculate based on limit
-            if start_time is None and limit is not None:
-                interval_minutes = self._get_interval_minutes(interval)
-                start_time = datetime.now() - timedelta(minutes=interval_minutes * limit)
-            
-            # Fetch data
-            candles = await self.fetch_candles(symbol, interval, limit)
-            
-            # Filter by timeframe if specified
-            if start_time or end_time:
-                filtered_candles = []
-                for candle in candles:
-                    if start_time and candle.timestamp < start_time:
-                        continue
-                    if end_time and candle.timestamp > end_time:
-                        continue
-                    filtered_candles.append(candle)
-                return filtered_candles
-            
+            # Validate inputs
+            self._validate_symbol(symbol)
+            self._validate_interval(interval)
+
+            # Normalize inputs
+            if start_time and start_time.tzinfo:
+                start_time = start_time.replace(tzinfo=None)
+            if end_time and end_time.tzinfo:
+                end_time = end_time.replace(tzinfo=None)
+
+            # Determine limit
+            if limit is None:
+                limit = settings.DEFAULT_CANDLES_LIMIT
+            limit = min(limit, settings.MAX_CANDLES_LIMIT)
+
+            # 1. Try to get data from database first
+            db_candles = await db_service.get_candles(
+                symbol, interval, limit,
+                start_time=start_time, end_time=end_time
+            )
+            if db_candles and len(db_candles) > 0:
+                logger.info(f"Returning {len(db_candles)} timeframe candles from database for {symbol} {interval}")
+                return db_candles
+
+            # 2. Fetch from exchange if not in database
+            logger.info(f"Fetching timeframe data for {symbol} {interval} from exchange")
+            candles = await self._fetch_timeframe_from_exchange(symbol, interval, start_time, end_time, limit)
+
+            # 3. Save to database
+            saved_count = await db_service.save_candles(symbol, interval, candles)
+            if saved_count > 0:
+                logger.info(f"Saved {saved_count} timeframe candles to database for {symbol} {interval}")
+
             return candles
             
         except Exception as e:
             logger.error(f"Error fetching data with timeframe: {e}")
             raise
-    
+
+    async def _fetch_timeframe_from_exchange(
+        self,
+        symbol: str,
+        interval: str,
+        start_time: Optional[datetime],
+        end_time: Optional[datetime],
+        limit: int
+    ) -> List[CandleData]:
+        """Fetch timeframe data directly from exchange."""
+        try:
+            ccxt_interval = self._convert_interval(interval)
+
+            since = None
+            if start_time:
+                since = int(start_time.timestamp() * 1000)
+            elif end_time:
+                # If only end_time provided, calculate since as end_time - limit * interval_duration
+                interval_seconds = self._get_interval_seconds(interval)
+                since_timestamp = end_time.timestamp() - (limit * interval_seconds)
+                since = int(since_timestamp * 1000)
+
+            ohlcv = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.exchange.fetch_ohlcv(symbol, ccxt_interval, since=since, limit=limit)
+            )
+
+            # Convert to CandleData objects
+            candles = [CandleData.from_ccxt(candle) for candle in ohlcv]
+
+            # Filter candles by end_time if provided (safety check)
+            if end_time:
+                candles = [c for c in candles if c.timestamp < end_time]
+
+            return candles
+
+        except ccxt.NetworkError as e:
+            logger.error(f"Network error fetching timeframe data for {symbol}: {e}")
+            raise Exception(f"Network error: {str(e)}")
+        except Exception as e:
+            logger.error(f"Exchange error fetching timeframe data for {symbol}: {e}")
+            raise Exception(f"Exchange error: {str(e)}")
+
     def get_available_symbols(self) -> List[str]:
         """Get list of available trading symbols."""
         return settings.SUPPORTED_SYMBOLS.copy()
@@ -230,6 +305,10 @@ class DataFetcher:
             '1d': 1440
         }
         return interval_minutes.get(interval, 60)
+
+    def _get_interval_seconds(self, interval: str) -> int:
+        """Get interval duration in seconds."""
+        return self._get_interval_minutes(interval) * 60
     
     def clear_cache(self) -> None:
         """Clear the data cache."""

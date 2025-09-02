@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Backfill Test</title>
+</head>
+<body>
+    <h1>Testing Backfill</h1>
+    <div id="log"></div>
+
+    <script>
+        const log = document.getElementById('log');
+
+        function addLog(message) {
+            const div = document.createElement('div');
+            div.textContent = new Date().toLocaleTimeString() + ': ' + message;
+            log.appendChild(div);
+            console.log(message);
+        }
+
+        // Intercept fetch requests
+        const originalFetch = window.fetch;
+        window.fetch = function(...args) {
+            if (args[0].includes('/api/v1/candles')) {
+                addLog('API Request: ' + args[0]);
+            }
+            return originalFetch.apply(this, args);
+        };
+
+        // Test API directly
+        setTimeout(() => {
+            addLog('Testing API...');
+            fetch('http://localhost:8000/api/v1/candles?symbol=BTC/USDT&interval=15m&limit=100')
+                .then(r => r.json())
+                .then(data => addLog('API Response: ' + data.length + ' candles'))
+                .catch(e => addLog('API Error: ' + e.message));
+        }, 1000);
+
+        addLog('Page loaded, waiting...');
+    </script>
+</body>
+</html>

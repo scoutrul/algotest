@@ -1,141 +1,101 @@
 // API client for backend communication
 const API_BASE_URL = 'http://localhost:8000/api/v1';
 
-class ApiClient {
-  constructor() {
-    this.baseURL = API_BASE_URL;
+export class ApiClient {
+  constructor(baseUrl = (import.meta.env && import.meta.env.VITE_API_BASE_URL) || (typeof window !== 'undefined' && window.API_BASE_URL) || 'http://localhost:8000') {
+    this.baseUrl = baseUrl;
   }
 
-  // Generic request method
-  async request(endpoint, options = {}) {
-    const url = `${this.baseURL}${endpoint}`;
-    const config = {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-      },
-      ...options
-    };
-
-    try {
-      const response = await fetch(url, config);
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      return await response.json();
-    } catch (error) {
-      if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        throw new Error('Unable to connect to backend server. Please ensure the backend is running.');
-      }
-      throw error;
+  async request(path, options = {}) {
+    const url = `${this.baseUrl}${path}`;
+    const res = await fetch(url, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `Request failed: ${res.status}`);
     }
+    return res.json();
   }
 
-  // Health check
+  // Basic endpoints
   async getHealth() {
-    return this.request('/health');
+    return this.request(`/api/v1/health`);
   }
 
-  // Get available symbols
   async getSymbols() {
-    return this.request('/symbols');
+    return this.request(`/api/v1/symbols`);
   }
 
-  // Get available intervals
   async getIntervals() {
-    return this.request('/intervals');
+    return this.request(`/api/v1/intervals`);
   }
 
-  // Get configuration
   async getConfig() {
-    return this.request('/config');
+    return this.request(`/api/v1/config`);
   }
 
-  // Run backtest (GET)
+  // Backtest
   async runBacktestGet(params) {
     const queryParams = new URLSearchParams();
-    
-    // Validate required parameters
-    if (!params.symbol || params.symbol === 'undefined') {
-      throw new Error('Symbol is required');
-    }
-    if (!params.interval || params.interval === 'undefined') {
-      throw new Error('Interval is required');
-    }
-    
-    // Add required parameters
+
+    if (!params || !params.symbol) throw new Error('Symbol is required');
+    if (!params.interval) throw new Error('Interval is required');
+
     queryParams.append('symbol', params.symbol);
     queryParams.append('interval', params.interval);
-    
-    // Add optional strategy parameters
-    if (params.lookback_period !== undefined) {
-      queryParams.append('lookback_period', params.lookback_period);
-    }
-    if (params.volume_threshold !== undefined) {
-      queryParams.append('volume_threshold', params.volume_threshold);
-    }
-    if (params.min_price_change !== undefined) {
-      queryParams.append('min_price_change', params.min_price_change);
-    }
-    if (params.take_profit !== undefined) {
-      queryParams.append('take_profit', params.take_profit);
-    }
-    if (params.stop_loss !== undefined) {
-      queryParams.append('stop_loss', params.stop_loss);
-    }
-    if (params.max_trades !== undefined) {
-      queryParams.append('max_trades', params.max_trades);
-    }
-    if (params.initial_capital !== undefined) {
-      queryParams.append('initial_capital', params.initial_capital);
-    }
-    if (params.limit !== undefined) {
-      queryParams.append('limit', params.limit);
-    }
-    
-    return this.request(`/backtest?${queryParams.toString()}`);
+
+    if (params.lookback_period !== undefined) queryParams.append('lookback_period', params.lookback_period);
+    if (params.volume_threshold !== undefined) queryParams.append('volume_threshold', params.volume_threshold);
+    if (params.min_price_change !== undefined) queryParams.append('min_price_change', params.min_price_change);
+    if (params.take_profit !== undefined) queryParams.append('take_profit', params.take_profit);
+    if (params.stop_loss !== undefined) queryParams.append('stop_loss', params.stop_loss);
+    if (params.max_trades !== undefined) queryParams.append('max_trades', params.max_trades);
+    if (params.initial_capital !== undefined) queryParams.append('initial_capital', params.initial_capital);
+    if (params.limit !== undefined) queryParams.append('limit', params.limit);
+
+    return this.request(`/api/v1/backtest?${queryParams.toString()}`);
   }
 
-  // Run backtest (POST)
   async runBacktestPost(params) {
-    return this.request('/backtest', {
+    return this.request(`/api/v1/backtest`, {
       method: 'POST',
-      body: JSON.stringify(params)
+      body: JSON.stringify(params),
     });
   }
 
-  // Run backtest (auto-detect method)
   async runBacktest(params) {
-    // Use GET method for simple parameters, POST for complex ones
-    const hasComplexParams = params.start_time || params.end_time || Object.keys(params.strategy_params || {}).length > 5;
-    
-    if (hasComplexParams) {
+    // Use GET for simple cases, POST when strategy_params or timeframe present
+    const hasComplex = params && (params.start_time || params.end_time || params.strategy_params);
+    if (hasComplex) {
       return this.runBacktestPost(params);
-    } else {
-      // Convert to GET format
-      const getParams = {
-        symbol: params.symbol,
-        interval: params.interval,
-        ...params.strategy_params,
-        limit: params.limit
-      };
-      return this.runBacktestGet(getParams);
     }
+    return this.runBacktestGet(params);
   }
 
-  // Get engine info
+  // Strategy/engine info
   async getEngineInfo() {
-    return this.request('/engine/info');
+    return this.request(`/api/v1/engine/info`);
   }
 
-  // Get strategy info
   async getStrategyInfo() {
-    return this.request('/strategy/info');
+    return this.request(`/api/v1/strategy/info`);
+  }
+
+  // Candles pagination for backfill
+  async getCandles({ symbol, interval, limit = 500, start_time = null, end_time = null }) {
+    if (!symbol) throw new Error('symbol is required');
+    if (!interval) throw new Error('interval is required');
+    const params = new URLSearchParams({ symbol, interval, limit: String(limit) });
+    if (end_time) {
+      params.append('end_time', new Date(end_time).toISOString());
+    } else if (start_time) {
+      // Fallback for backward compatibility, but prefer end_time
+      params.append('start_time', new Date(start_time).toISOString());
+    }
+    return this.request(`/api/v1/candles?${params.toString()}`);
   }
 }
 
-// Export singleton instance
 export const apiClient = new ApiClient();

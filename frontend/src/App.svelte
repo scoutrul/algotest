@@ -5,6 +5,7 @@
   import StrategyForm from './components/StrategyForm.svelte';
   import Statistics from './components/Statistics.svelte';
   import Controls from './components/Controls.svelte';
+  import DataManager from './components/DataManager.svelte';
   import { backtestStore } from './stores/backtest.js';
   import { configStore } from './stores/config.js';
 
@@ -13,7 +14,9 @@
   let strategyPanelCollapsed = false;
   let statsPanelCollapsed = false;
   let loading = false;
+  let isBackfilling = false;
   let error = null;
+  let activeTab = 'backtest'; // 'backtest' or 'data'
 
   // Store subscriptions
   $: backtestData = $backtestStore;
@@ -75,50 +78,78 @@
     <div class="header-content">
       <h1 class="app-title">BackTest Trading Bot</h1>
       <div class="header-controls">
-        <Controls 
-          bind:selectedSymbol={config.selectedSymbol}
-          bind:selectedInterval={config.selectedInterval}
-          {loading}
-          on:backtest={handleBacktest}
-        />
+        {#if activeTab === 'backtest'}
+          <Controls
+            bind:selectedSymbol={config.selectedSymbol}
+            bind:selectedInterval={config.selectedInterval}
+            {loading}
+            on:backtest={handleBacktest}
+          />
+        {/if}
       </div>
     </div>
+
+    <!-- Tab navigation -->
+    <nav class="tab-nav">
+      <button
+        class="tab-btn {activeTab === 'backtest' ? 'active' : ''}"
+        on:click={() => activeTab = 'backtest'}
+      >
+        Backtesting
+      </button>
+      <button
+        class="tab-btn {activeTab === 'data' ? 'active' : ''}"
+        on:click={() => activeTab = 'data'}
+      >
+        Data Management
+      </button>
+    </nav>
   </header>
 
   <!-- Main content area -->
-  <div class="app-main">
-    <!-- Chart panel -->
-    <section class="chart-panel" class:fullscreen={chartFullscreen}>
-      <Chart 
-        candles={backtestData.candles}
-        trades={backtestData.trades}
-        symbol={config.selectedSymbol}
-        interval={config.selectedInterval}
-        bind:fullscreen={chartFullscreen}
-        {loading}
-      />
-    </section>
+  {#if activeTab === 'backtest'}
+    <div class="app-main">
+      <!-- Chart panel -->
+      <section class="chart-panel" class:fullscreen={chartFullscreen}>
+        <Chart
+          candles={backtestData.candles}
+          trades={backtestData.trades}
+          symbol={config.selectedSymbol}
+          interval={config.selectedInterval}
+          bind:fullscreen={chartFullscreen}
+          {loading}
+          bind:isBackfilling
+        />
+      </section>
 
-    <!-- Strategy parameters panel -->
-    <aside class="strategy-panel" class:collapsed={strategyPanelCollapsed}>
-      <StrategyForm 
-        bind:params={config.strategyParams}
-        bind:collapsed={strategyPanelCollapsed}
-        {loading}
-        on:backtest={handleBacktest}
-      />
-    </aside>
+      <!-- Strategy parameters panel -->
+      <aside class="strategy-panel" class:collapsed={strategyPanelCollapsed}>
+        <StrategyForm
+          bind:params={config.strategyParams}
+          bind:collapsed={strategyPanelCollapsed}
+          {loading}
+          on:backtest={handleBacktest}
+        />
+      </aside>
 
-    <!-- Statistics panel -->
-    <aside class="stats-panel" class:collapsed={statsPanelCollapsed}>
-      <Statistics 
-        statistics={backtestData.statistics}
-        trades={backtestData.trades}
-        bind:collapsed={statsPanelCollapsed}
-        {loading}
-      />
-    </aside>
-  </div>
+      <!-- Statistics panel -->
+      <aside class="stats-panel" class:collapsed={statsPanelCollapsed}>
+        <Statistics
+          statistics={backtestData.statistics}
+          trades={backtestData.trades}
+          bind:collapsed={statsPanelCollapsed}
+          {loading}
+        />
+      </aside>
+    </div>
+  {:else if activeTab === 'data'}
+    <div class="app-main">
+      <!-- Data management panel -->
+      <section class="data-panel">
+        <DataManager />
+      </section>
+    </div>
+  {/if}
 
   <!-- Error overlay -->
   {#if error}
@@ -196,6 +227,44 @@
     font-weight: 600;
   }
 
+  /* Tab navigation */
+  .tab-nav {
+    display: flex;
+    gap: 0.5rem;
+    border-bottom: 1px solid #34495e;
+  }
+
+  .tab-btn {
+    background: transparent;
+    border: none;
+    color: #bdc3c7;
+    padding: 0.75rem 1.5rem;
+    cursor: pointer;
+    border-radius: 4px 4px 0 0;
+    transition: all 0.2s ease;
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+
+  .tab-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ecf0f1;
+  }
+
+  .tab-btn.active {
+    background: #3498db;
+    color: white;
+  }
+
+  /* Data panel */
+  .data-panel {
+    grid-area: chart;
+    padding: 1rem;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+
   /* Main content area */
   .app-main {
     display: grid;
@@ -203,10 +272,10 @@
       "chart"
       "strategy"
       "stats";
-    grid-template-rows: 1fr auto auto;
+    grid-template-rows: minmax(400px, 1fr) auto auto;
     gap: 1rem;
     padding: 1rem;
-    max-width: 1400px;
+    max-width: 1200px;
     margin: 0 auto;
     width: 100%;
   }
@@ -329,30 +398,33 @@
   @media (min-width: 768px) {
     .app-main {
       grid-template-areas: 
-        "chart chart"
-        "strategy stats";
-      grid-template-columns: 1fr 1fr;
-      grid-template-rows: 1fr auto;
+        "chart"
+        "strategy"
+        "stats";
+      grid-template-columns: 1fr;
+      grid-template-rows: minmax(500px, 1fr) auto auto;
     }
   }
 
   @media (min-width: 1024px) {
     .app-main {
       grid-template-areas: 
-        "chart chart strategy"
-        "chart chart stats";
-      grid-template-columns: 2fr 1fr;
-      grid-template-rows: 1fr 1fr;
+        "chart"
+        "strategy"
+        "stats";
+      grid-template-columns: 1fr;
+      grid-template-rows: minmax(600px, 1fr) auto auto;
     }
   }
 
   @media (min-width: 1400px) {
     .app-main {
       grid-template-areas: 
-        "chart chart strategy"
-        "chart chart stats";
-      grid-template-columns: 2fr 1fr;
-      grid-template-rows: 1fr 1fr;
+        "chart"
+        "strategy"
+        "stats";
+      grid-template-columns: 1fr;
+      grid-template-rows: minmax(700px, 1fr) auto auto;
     }
   }
 </style>

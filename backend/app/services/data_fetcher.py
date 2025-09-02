@@ -90,7 +90,7 @@ class DataFetcher:
             candles = [CandleData.from_ccxt(candle) for candle in ohlcv]
             
             # Cache the result in both Redis and local cache
-            await data_cache.set_candles(symbol, interval, limit, [candle.dict() for candle in candles])
+            await data_cache.set_candles(symbol, interval, limit, [candle.model_dump() for candle in candles])
             self._cache[cache_key] = candles
             
             logger.info(f"Successfully fetched {len(candles)} candles for {symbol}")

@@ -7,6 +7,7 @@ from datetime import datetime
 import logging
 
 from ..services.backtest import BacktestEngine
+from ..services.optimized_backtest import OptimizedBacktestEngine
 from ..models.backtest import BacktestRequest, BacktestResult
 from ..models.strategy import StrategyParams
 from ..config import settings
@@ -16,8 +17,9 @@ logger = logging.getLogger(__name__)
 # Create router
 router = APIRouter(prefix="/api/v1", tags=["backtest"])
 
-# Global backtest engine instance
+# Global backtest engine instances
 backtest_engine = BacktestEngine()
+optimized_backtest_engine = OptimizedBacktestEngine()
 
 @router.get("/health")
 async def health_check():
@@ -118,9 +120,9 @@ async def run_backtest(
                 }
             )
         
-        # Run backtest
-        logger.info(f"Running backtest for {symbol} {interval}")
-        result = await backtest_engine.run_backtest(request)
+        # Run backtest with optimized engine
+        logger.info(f"Running optimized backtest for {symbol} {interval}")
+        result = await optimized_backtest_engine.run_backtest(request)
         
         if not result.success:
             raise HTTPException(
@@ -216,4 +218,63 @@ async def get_config():
         }
     except Exception as e:
         logger.error(f"Error getting config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/prefetch")
+async def prefetch_data(
+    symbols: Optional[str] = Query(None, description="Comma-separated list of symbols to prefetch"),
+    intervals: Optional[str] = Query(None, description="Comma-separated list of intervals to prefetch")
+):
+    """
+    Prefetch data for popular trading pairs and intervals.
+    
+    Args:
+        symbols: Comma-separated list of symbols (default: popular symbols)
+        intervals: Comma-separated list of intervals (default: popular intervals)
+        
+    Returns:
+        Prefetch operation result
+    """
+    try:
+        # Default symbols and intervals
+        default_symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT']
+        default_intervals = ['15m', '1h', '4h']
+        
+        # Parse input parameters
+        symbol_list = symbols.split(',') if symbols else default_symbols
+        interval_list = intervals.split(',') if intervals else default_intervals
+        
+        # Clean up parameters
+        symbol_list = [s.strip().upper() for s in symbol_list if s.strip()]
+        interval_list = [i.strip() for i in interval_list if i.strip()]
+        
+        logger.info(f"Starting prefetch for {len(symbol_list)} symbols and {len(interval_list)} intervals")
+        
+        # Run prefetch
+        await optimized_backtest_engine.prefetch_data(symbol_list, interval_list)
+        
+        return {
+            "success": True,
+            "message": "Data prefetch completed successfully",
+            "symbols": symbol_list,
+            "intervals": interval_list,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in prefetch endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/performance")
+async def get_performance_stats():
+    """Get performance statistics for the optimized backtest engine."""
+    try:
+        stats = optimized_backtest_engine.get_performance_stats()
+        return {
+            "success": True,
+            "data": stats,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting performance stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))

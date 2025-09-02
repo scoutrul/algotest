@@ -1,0 +1,67 @@
+{
+  "data_fetching": {
+    "test_name": "data_fetching",
+    "duration_seconds": 7.1771,
+    "memory_start_mb": 90.02,
+    "memory_end_mb": 240.34,
+    "memory_delta_mb": 150.33,
+    "timestamp": "2025-09-02T00:23:15.581019",
+    "symbol": "BTC/USDT",
+    "interval": "15m",
+    "limit": 1000,
+    "data_points": 1000,
+    "success": true
+  },
+  "strategy_calculation": {
+    "test_name": "strategy_calculation",
+    "duration_seconds": 0.0002,
+    "memory_start_mb": 242.91,
+    "memory_end_mb": 242.91,
+    "memory_delta_mb": 0.0,
+    "timestamp": "2025-09-02T00:23:21.304844",
+    "error": "'StrategyParams' object has no attribute 'get'",
+    "success": false
+  },
+  "backtest_execution": {
+    "test_name": "backtest_execution",
+    "duration_seconds": 0.0011,
+    "memory_start_mb": 242.91,
+    "memory_end_mb": 242.92,
+    "memory_delta_mb": 0.02,
+    "timestamp": "2025-09-02T00:23:21.306065",
+    "error": "1 validation error for BacktestRequest\nstrategy_params\n  Input should be a valid dictionary [type=dict_type, input_value=StrategyParams(symbol='BT...IVE: 'hybrid_adaptive'>), input_type=StrategyParams]\n    For further information visit https://errors.pydantic.dev/2.5/v/dict_type",
+    "success": false
+  },
+  "api_endpoint_/api/v1/health": {
+    "test_name": "api_endpoint_/api/v1/health",
+    "duration_seconds": 0.0369,
+    "memory_start_mb": 242.3,
+    "memory_end_mb": 243.88,
+    "memory_delta_mb": 1.58,
+    "timestamp": "2025-09-02T00:23:21.404928",
+    "endpoint": "/api/v1/health",
+    "iterations": 5,
+    "successes": 5,
+    "success_rate": 1.0,
+    "avg_duration": 0.006,
+    "min_duration": 0.0016,
+    "max_duration": 0.0223,
+    "median_duration": 0.0018
+  },
+  "api_endpoint_/api/v1/backtest": {
+    "test_name": "api_endpoint_/api/v1/backtest",
+    "duration_seconds": 0.0188,
+    "memory_start_mb": 243.89,
+    "memory_end_mb": 243.88,
+    "memory_delta_mb": -0.02,
+    "timestamp": "2025-09-02T00:23:21.423894",
+    "endpoint": "/api/v1/backtest",
+    "iterations": 3,
+    "successes": 0,
+    "success_rate": 0.0,
+    "avg_duration": 0.0046,
+    "min_duration": 0.0024,
+    "max_duration": 0.0086,
+    "median_duration": 0.0028
+  }
+}

@@ -16,6 +16,7 @@ pydantic==2.5.0
 
 # HTTP Client
 httpx==0.25.2
+aiohttp==3.9.1
 
 # CORS Support
 python-multipart==0.0.6

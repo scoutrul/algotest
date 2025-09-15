@@ -49,7 +49,7 @@ async def get_data_status() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Failed to get data status: {str(e)}")
 
 
-@router.post("/sync/{symbol}/{interval}")
+@router.post("/sync/{symbol:path}/{interval}")
 async def sync_data(
     symbol: str,
     interval: str,
@@ -117,12 +117,41 @@ async def sync_data_background(symbol: str, interval: str, limit: int):
     try:
         logger.info(f"Starting background sync for {symbol} {interval}")
 
-        # Get current data count
+        # Get current status and count
         current_count = await db_service.get_candles_count(symbol, interval)
+        status = await db_service.get_data_status(symbol, interval)
         logger.info(f"Current data count for {symbol} {interval}: {current_count}")
 
-        # Fetch and save data
-        candles = await data_fetcher.fetch_candles(symbol, interval, limit)
+        # Determine incremental fetch window: from newest_timestamp forward
+        start_time = None
+        if status and getattr(status, "newest_timestamp", None):
+            # Fetch from the next interval after newest_timestamp to avoid DB short-circuit
+            try:
+                from datetime import timedelta
+                interval_seconds = data_fetcher._get_interval_seconds(interval)
+                start_time = status.newest_timestamp + timedelta(seconds=interval_seconds)
+            except Exception:
+                start_time = status.newest_timestamp
+
+        # Prefer timeframe-based fetch to load missing tail; falls back to recent window
+        if start_time:
+            logger.info(
+                f"Fetching missing candles from {start_time.isoformat()} for {symbol} {interval} (exchange)"
+            )
+            # Bypass DB short-circuit and fetch directly from exchange
+            candles = await data_fetcher._fetch_timeframe_from_exchange(  # noqa: SLF001
+                symbol=symbol,
+                interval=interval,
+                start_time=start_time,
+                end_time=None,
+                limit=limit,
+            )
+        else:
+            logger.info(
+                f"No existing data found, fetching recent window for {symbol} {interval}"
+            )
+            candles = await data_fetcher.fetch_candles(symbol, interval, limit)
+
         saved_count = await db_service.save_candles(symbol, interval, candles)
 
         logger.info(f"Background sync completed for {symbol} {interval}: saved {saved_count} candles")
@@ -131,7 +160,7 @@ async def sync_data_background(symbol: str, interval: str, limit: int):
         logger.error(f"Error in background sync for {symbol} {interval}: {e}")
 
 
-@router.delete("/clear/{symbol}/{interval}")
+@router.delete("/clear/{symbol:path}/{interval}")
 async def clear_data(symbol: str, interval: str) -> Dict[str, Any]:
     """Clear all data for a specific symbol and interval."""
     try:

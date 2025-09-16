@@ -183,39 +183,50 @@
       const askCap = Math.min(50, (orderBook.ask_levels?.length || 0));
       const askLevels = orderBook.ask_levels?.slice(0, askCap) || [];
       
-      // Add significant bid levels as horizontal price lines
-      bidLevels.forEach((level, index) => {
-        if (level.volume > 0.5) { // Only show significant volumes
-          try {
-            const priceLine = candlestickSeries.createPriceLine({
-              price: level.price,
-              color: `rgba(76, 175, 80, ${Math.min(0.8, 0.3 + (level.volume / 10))})`,
-              lineWidth: Math.max(1, Math.min(4, level.volume / 5)),
-              lineStyle: 0, // Solid line
-              axisLabelVisible: true,
-              title: `Bid: ${level.volume.toFixed(2)}`,
-            });
-            liquidityPriceLines.push(priceLine);
-          } catch (e) {}
-        }
-      });
+             // Compute max volume among shown levels for relative styling
+       const maxOverlayVolume = Math.max(1, ...[...bidLevels, ...askLevels].map(l => Number(l.volume) || 0));
+
+       // Add significant bid levels as horizontal price lines
+       bidLevels.forEach((level) => {
+         const vol = Number(level.volume) || 0;
+         if (vol > 0) {
+           const rel = Math.min(1, vol / maxOverlayVolume);
+           const alpha = (0.2 + 0.8 * rel).toFixed(3); // 0.2..1.0
+           const lw = Math.max(1, Math.round(1 + rel * 4)); // 1..5
+           try {
+             const priceLine = candlestickSeries.createPriceLine({
+               price: level.price,
+               color: `rgba(76, 175, 80, ${alpha})`,
+               lineWidth: lw,
+               lineStyle: 0,
+               axisLabelVisible: false,
+               title: '',
+             });
+             liquidityPriceLines.push(priceLine);
+           } catch (e) {}
+         }
+       });
       
-      // Add significant ask levels as horizontal price lines  
-      askLevels.forEach((level, index) => {
-        if (level.volume > 0.5) { // Only show significant volumes
-          try {
-            const priceLine = candlestickSeries.createPriceLine({
-              price: level.price,
-              color: `rgba(244, 67, 54, ${Math.min(0.8, 0.3 + (level.volume / 10))})`,
-              lineWidth: Math.max(1, Math.min(4, level.volume / 5)),
-              lineStyle: 0, // Solid line
-              axisLabelVisible: true,
-              title: `Ask: ${level.volume.toFixed(2)}`,
-            });
-            liquidityPriceLines.push(priceLine);
-          } catch (e) {}
-        }
-      });
+             // Add significant ask levels as horizontal price lines  
+       askLevels.forEach((level) => {
+         const vol = Number(level.volume) || 0;
+         if (vol > 0) {
+           const rel = Math.min(1, vol / maxOverlayVolume);
+           const alpha = (0.2 + 0.8 * rel).toFixed(3);
+           const lw = Math.max(1, Math.round(1 + rel * 4));
+           try {
+             const priceLine = candlestickSeries.createPriceLine({
+               price: level.price,
+               color: `rgba(244, 67, 54, ${alpha})`,
+               lineWidth: lw,
+               lineStyle: 0,
+               axisLabelVisible: false,
+               title: '',
+             });
+             liquidityPriceLines.push(priceLine);
+           } catch (e) {}
+         }
+       });
       
       console.log(`📊 Updated liquidity overlay: ${bidLevels.length} bids, ${askLevels.length} asks, ${liquidityPriceLines.length} lines`);
       
@@ -336,8 +347,8 @@
       width: chartContainer.clientWidth,
       height: chartContainer.clientHeight,
       layout: {
-        background: { color: '#ffffff' },
-        textColor: '#333333',
+        background: { type: 'Solid', color: '#ffffff' },
+        textColor: '#333',
       },
       grid: {
         vertLines: { color: '#f0f0f0' },
@@ -353,6 +364,8 @@
           top: 0.1,
           bottom: 0.1,
         },
+        // 4 decimal digits on axis
+        entireTextOnly: false,
       },
       timeScale: {
         borderColor: '#cccccc',
@@ -369,6 +382,11 @@
       borderUpColor: '#26a69a',
       wickDownColor: '#ef5350',
       wickUpColor: '#26a69a',
+      priceFormat: {
+        type: 'price',
+        precision: 4,
+        minMove: 0.0001,
+      },
     });
 
     // 🚀 Initialize liquidity overlay if needed

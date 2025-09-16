@@ -259,3 +259,12 @@ class DatabaseService:
 # Global database service instance
 db_service = DatabaseService()
 
+
+def get_db():
+    """Dependency for FastAPI to get database session."""
+    session = db_service.get_session()
+    try:
+        yield session
+    finally:
+        session.close()
+

@@ -13,6 +13,8 @@ from .api.backtest import router as backtest_router
 from .api.performance import router as performance_router
 from .api.market import router as market_router
 from .api.data import router as data_router
+from .api.orderbook import router as orderbook_router
+from .api.basic import router as basic_router
 from .middleware.performance import PerformanceMiddleware
 from .services.database import db_service
 
@@ -49,10 +51,18 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(basic_router)  # Basic endpoints first
 app.include_router(backtest_router)
 app.include_router(performance_router, prefix="/api/v1", tags=["performance"])
 app.include_router(market_router)
 app.include_router(data_router)
+
+# 🚀 Include Order Book router (liquidity feature)
+if settings.LIQUIDITY_FEATURE_ENABLED:
+    app.include_router(orderbook_router, tags=["liquidity"])
+    logger.info("✅ Order Book API endpoints enabled")
+else:
+    logger.info("⚠️ Order Book API endpoints disabled (LIQUIDITY_FEATURE_ENABLED=false)")
 
 @app.get("/")
 async def root():
@@ -61,7 +71,12 @@ async def root():
         "message": "BackTest Trading Bot API",
         "version": settings.API_VERSION,
         "docs": "/docs",
-        "health": "/api/v1/health"
+        "health": "/api/v1/health",
+        "features": {
+            "backtesting": True,
+            "market_data": True,
+            "liquidity_analysis": settings.LIQUIDITY_FEATURE_ENABLED
+        }
     }
 
 @app.exception_handler(Exception)
@@ -79,17 +94,18 @@ async def global_exception_handler(request, exc):
 @app.on_event("startup")
 async def startup_event():
     """Application startup event."""
-    logger.info("BackTest Trading Bot API starting up...")
-    logger.info(f"API Version: {settings.API_VERSION}")
-    logger.info(f"Debug Mode: {settings.DEBUG}")
-    logger.info(f"CORS Origins: {settings.CORS_ORIGINS}")
+    logger.info("🚀 BackTest Trading Bot API starting up...")
+    logger.info(f"📊 API Version: {settings.API_VERSION}")
+    logger.info(f"🐛 Debug Mode: {settings.DEBUG}")
+    logger.info(f"🌐 CORS Origins: {settings.CORS_ORIGINS}")
+    logger.info(f"💧 Liquidity Feature: {'✅ Enabled' if settings.LIQUIDITY_FEATURE_ENABLED else '❌ Disabled'}")
 
     # Initialize database
     try:
         db_service.create_tables()
-        logger.info("Database tables created successfully")
+        logger.info("✅ Database tables created successfully")
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.error(f"❌ Failed to initialize database: {e}")
         raise
 
     # Auto-update market data on startup
@@ -105,28 +121,59 @@ async def startup_event():
             ("ETH/USDT", "1h"),
         ]
         
-        logger.info("Starting automatic market data update...")
+        logger.info("📈 Starting automatic market data update...")
         
         # Run updates in background without blocking startup
         async def auto_update_data():
             for symbol, interval in priority_updates:
                 try:
                     await sync_data_background(symbol, interval, limit=2000)
-                    logger.info(f"Auto-updated {symbol} {interval}")
+                    logger.info(f"✅ Auto-updated {symbol} {interval}")
                 except Exception as e:
-                    logger.warning(f"Auto-update failed for {symbol} {interval}: {e}")
+                    logger.warning(f"⚠️ Auto-update failed for {symbol} {interval}: {e}")
         
         # Schedule the update task to run after startup completes
         asyncio.create_task(auto_update_data())
-        logger.info("Automatic data update scheduled")
+        logger.info("✅ Automatic data update scheduled")
         
     except Exception as e:
-        logger.warning(f"Failed to schedule automatic data update: {e}")
+        logger.warning(f"⚠️ Failed to schedule automatic data update: {e}")
+
+    # 🚀 Start Order Book collection if enabled
+    if settings.LIQUIDITY_FEATURE_ENABLED:
+        try:
+            from .services.orderbook_collector import start_background_collection
+            import asyncio
+            
+            logger.info("💧 Starting Order Book collection service...")
+            
+            # Start collection in background
+            asyncio.create_task(start_background_collection())
+            logger.info("✅ Order Book collection service started")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to start Order Book collection: {e}")
+            # Don't raise here - let the app start without liquidity feature
+            logger.warning("⚠️ Application will continue without liquidity data collection")
+    else:
+        logger.info("⏭️ Order Book collection skipped (feature disabled)")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Application shutdown event."""
-    logger.info("BackTest Trading Bot API shutting down...")
+    logger.info("🛑 BackTest Trading Bot API shutting down...")
+    
+    # Stop Order Book collection if running
+    if settings.LIQUIDITY_FEATURE_ENABLED:
+        try:
+            from .services.orderbook_collector import stop_background_collection
+            logger.info("💧 Stopping Order Book collection...")
+            await stop_background_collection()
+            logger.info("✅ Order Book collection stopped")
+        except Exception as e:
+            logger.warning(f"⚠️ Error stopping Order Book collection: {e}")
+    
+    logger.info("👋 Shutdown complete")
 
 if __name__ == "__main__":
     uvicorn.run(

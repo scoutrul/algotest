@@ -1,0 +1,7 @@
+# Frontend-specific ignore rules
+
+# Ignore all environment files
+.env*
+
+# Local runtime caches (optional, safe to ignore)
+.cache/

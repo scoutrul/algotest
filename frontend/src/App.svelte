@@ -6,8 +6,10 @@
   import Statistics from './components/Statistics.svelte';
   import Controls from './components/Controls.svelte';
   import DataManager from './components/DataManager.svelte';
+  import LiquidityChart from './components/charts/LiquidityChart.svelte';
   import { backtestStore } from './stores/backtest.js';
   import { configStore } from './stores/config.js';
+  import { liquidityStore } from './stores/liquidity.js';
 
   // Reactive state
   let chartFullscreen = false;
@@ -30,6 +32,17 @@
         configStore.loadSymbols(),
         configStore.loadIntervals()
       ]);
+
+      // 💧 Initialize liquidity feature
+      try {
+        await liquidityStore.loadStats();
+        // Enable liquidity feature by default
+        liquidityStore.enable();
+        console.log('✅ Liquidity feature initialized successfully');
+      } catch (liquidityErr) {
+        console.warn('⚠️ Failed to initialize liquidity feature:', liquidityErr);
+        // Don't block app startup if liquidity fails
+      }
     } catch (err) {
       console.error('Error loading configuration:', err);
       error = err.message;
@@ -110,6 +123,13 @@
   function toggleChartFullscreen() {
     chartFullscreen = !chartFullscreen;
   }
+
+  // 🚀 Handle liquidity toggle
+  function handleLiquidityToggled(event) {
+    console.log('Liquidity toggled:', event.detail);
+    // The store is already updated by the Controls component
+    // Chart.svelte will react to the store changes automatically
+  }
 </script>
 
 <main class="trading-app" class:fullscreen={chartFullscreen}>
@@ -126,6 +146,7 @@
             on:backtest={handleBacktest}
             on:symbolChanged={handleSymbolChanged}
             on:intervalChanged={handleIntervalChanged}
+            on:liquidityToggled={handleLiquidityToggled}
           />
         {/if}
       </div>
@@ -160,9 +181,79 @@
           interval={config.selectedInterval}
           bind:fullscreen={chartFullscreen}
           {loading}
-          bind:isBackfilling
-        />
-      </section>
+                      bind:isBackfilling
+          />
+          <div class="liquidity-under-chart">
+            <div class="liquidity-under-chart__header">
+              <h3>💧 Liquidity Analysis</h3>
+              <div class="liquidity-controls">
+                <label class="control-item">
+                  <span class="control-label">Opacity:</span>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.05"
+                    bind:value={$liquidityStore.settings.opacity}
+                    on:input={(e) => liquidityStore.setOpacity(parseFloat(e.target.value))}
+                    class="range-input"
+                  />
+                  <span class="control-value">{Math.round($liquidityStore.settings.opacity * 100)}%</span>
+                </label>
+                
+                <label class="control-item">
+                  <span class="control-label">Min Vol:</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    bind:value={$liquidityStore.settings.minVolume}
+                    on:change={(e) => liquidityStore.setMinVolume(parseFloat(e.target.value))}
+                    class="number-input"
+                  />
+                </label>
+                
+                <label class="control-item">
+                  <span class="control-label">Max Levels:</span>
+                  <input
+                    type="number"
+                    min="5"
+                    max="50"
+                    step="1"
+                    bind:value={$liquidityStore.settings.maxLevels}
+                    on:change={(e) => liquidityStore.setMaxLevels(parseInt(e.target.value))}
+                    class="number-input"
+                  />
+                </label>
+                
+                <label class="control-item checkbox-item">
+                  <input
+                    type="checkbox"
+                    bind:checked={$liquidityStore.settings.autoUpdate}
+                    on:change={(e) => {
+                      if (e.target.checked) {
+                        liquidityStore.startAutoUpdate(config.selectedSymbol || 'BTCUSDT');
+                      } else {
+                        liquidityStore.stopAutoUpdate();
+                      }
+                    }}
+                    class="checkbox-input"
+                  />
+                  <span class="control-label">Auto-update</span>
+                </label>
+              </div>
+            </div>
+            <div class="liquidity-under-chart__content">
+              <LiquidityChart
+                symbol={config.selectedSymbol || 'BTCUSDT'}
+                height={220}
+                opacity={$liquidityStore.settings.opacity}
+                minVolume={$liquidityStore.settings.minVolume}
+                maxLevels={$liquidityStore.settings.maxLevels}
+              />
+            </div>
+          </div>
+        </section>
 
       <!-- Strategy parameters panel -->
       <aside class="strategy-panel" class:collapsed={strategyPanelCollapsed}>
@@ -184,6 +275,7 @@
         />
       </aside>
     </div>
+  
   {:else if activeTab === 'data'}
     <div class="app-main">
       <!-- Data management panel -->
@@ -435,6 +527,175 @@
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
   }
+
+  /* 💧 Liquidity Layout Styles */
+
+
+  /* 💧 Liquidity Layout Styles */
+  .liquidity-under-chart {
+    margin-top: 12px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(0, 188, 212, 0.25);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .liquidity-under-chart__header {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(0, 188, 212, 0.2);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .liquidity-under-chart__header h3 {
+    margin: 0;
+    font-size: 14px;
+    color: #00bcd4;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .liquidity-under-chart__content {
+    padding: 8px 8px 0 8px;
+  }
+
+  /* Liquidity Controls */
+  .liquidity-controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px 12px;
+    align-items: center;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .control-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: #bbb;
+    min-width: 0;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 4px 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 188, 212, 0.1);
+  }
+
+  .control-label {
+    white-space: nowrap;
+    font-weight: 500;
+    font-size: 10px;
+    min-width: max-content;
+  }
+
+  .control-value {
+    min-width: 35px;
+    text-align: center;
+    color: #00bcd4;
+    font-weight: 600;
+    font-size: 10px;
+    background: rgba(0, 188, 212, 0.1);
+    padding: 1px 4px;
+    border-radius: 2px;
+  }
+
+  .range-input {
+    width: 50px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+    flex: 1;
+    min-width: 40px;
+  }
+
+  .range-input::-webkit-slider-thumb {
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    background: #00bcd4;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  .number-input {
+    width: 45px;
+    padding: 2px 4px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(0, 188, 212, 0.3);
+    border-radius: 3px;
+    color: #fff;
+    font-size: 10px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  .number-input:focus {
+    outline: none;
+    border-color: #00bcd4;
+    box-shadow: 0 0 4px rgba(0, 188, 212, 0.3);
+  }
+
+  .checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    justify-content: flex-start;
+  }
+
+  .checkbox-input {
+    width: 12px;
+    height: 12px;
+    accent-color: #00bcd4;
+    flex-shrink: 0;
+  }
+
+  /* Responsive adjustments */
+  @media (max-width: 1024px) {
+    .liquidity-controls {
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 6px 8px;
+    }
+    .control-item {
+      padding: 3px 4px;
+    }
+  }
+
+  /* Responsive design for liquidity layout */
+  @media (max-width: 1200px) {
+    .liquidity-layout {
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr auto;
+      grid-template-areas: 
+        "chart"
+        "panel";
+    }
+    
+    .liquidity-panel-section {
+      max-height: 50vh;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .section-header {
+      padding: 16px;
+      flex-direction: column;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    
+    .section-title {
+      font-size: 20px;
+    }
+    
+    .chart-container {
+      padding: 16px;
+    }
+  }
+
+
 
   /* Responsive design */
   @media (min-width: 768px) {

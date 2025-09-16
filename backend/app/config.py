@@ -79,5 +79,18 @@ class Settings:
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
+    # 🚀 Liquidity Feature Configuration
+    LIQUIDITY_FEATURE_ENABLED: bool = os.getenv("LIQUIDITY_FEATURE_ENABLED", "true").lower() == "true"
+    LIQUIDITY_EXCHANGE: str = os.getenv("LIQUIDITY_EXCHANGE", "binance")
+    LIQUIDITY_SYMBOLS: List[str] = os.getenv("LIQUIDITY_SYMBOLS", "BTC/USDT,ETH/USDT,BNB/USDT").split(",")
+    LIQUIDITY_COLLECTION_INTERVAL: int = int(os.getenv("LIQUIDITY_COLLECTION_INTERVAL", "30"))  # seconds
+    LIQUIDITY_ORDER_BOOK_LIMIT: int = int(os.getenv("LIQUIDITY_ORDER_BOOK_LIMIT", "20"))  # levels
+    LIQUIDITY_HISTORY_RETENTION_DAYS: int = int(os.getenv("LIQUIDITY_HISTORY_RETENTION_DAYS", "30"))
+    LIQUIDITY_MIN_VOLUME_THRESHOLD: float = float(os.getenv("LIQUIDITY_MIN_VOLUME_THRESHOLD", "0.01"))
+    
+    # Liquidity Aggregation Settings
+    LIQUIDITY_AGGREGATION_INTERVALS: List[str] = ["5m", "15m", "1h", "4h", "1d"]
+    LIQUIDITY_MAX_HISTORY_LIMIT: int = 1000
+
 # Global settings instance
 settings = Settings()

@@ -3,6 +3,7 @@
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
   import { chartUtils } from '../utils/chart.js';
   import { apiClient } from '../utils/api.js';
+  import { liquidityStore, liquidityVisible, currentOrderBook } from '../stores/liquidity.js';
   let createChartFn = null;
 
   // Props
@@ -22,6 +23,11 @@
   let candlestickSeries;
   let tradeMarkers = [];
   let resizeObserver;
+  
+  // 🚀 Liquidity overlay state
+  let bidSeries = null;
+  let askSeries = null;
+  let liquidityOverlayActive = false;
   let initialHeight = 0;
   let lastWidth = 0;
   let isLoadingMore = false;
@@ -34,6 +40,8 @@
   let pendingBackfill = null;
   let debounceTimer = null;
   let leftPlaceholders = [];
+  let lastLogicalRange = null;
+  let prevRangeBeforeBackfill = null;
 
   // Limit concurrent backfill requests to prevent cascade
   let activeBackfillCount = 0;
@@ -223,6 +231,11 @@
       wickDownColor: '#ef5350',
       wickUpColor: '#26a69a',
     });
+
+    // 🚀 Initialize liquidity overlay if needed
+    if ($liquidityVisible) {
+      initializeLiquidityOverlay();
+    }
 
     // Handle resize
     // Lock initial height to prevent infinite growth on reflows
@@ -496,6 +509,16 @@
             backfillCursor = candles[0].timestamp;
             ensureLeftBuffer(500);
             updateChart({ preserveViewport: true });
+
+            // After prepending, keep the viewport anchored by shifting logical range to the right
+            if (prevRangeBeforeBackfill && onlyNew.length && chart) {
+              try {
+                chart.timeScale().setVisibleLogicalRange({
+                  from: prevRangeBeforeBackfill.from + onlyNew.length,
+                  to: prevRangeBeforeBackfill.to + onlyNew.length,
+                });
+              } catch (_) {}
+            }
           } else {
             // Nothing new, move cursor one interval back
             const ts = new Date(cursor).getTime() - (intervalToSec[interval] || 900) * 1000;
@@ -556,46 +579,40 @@
         isLoading: isLoadingMore
       });
 
-      // Improved trigger: load when less than 20% of screen width remains on the left
+      // Improved trigger: only when panning left and near the left edge of loaded data
       const windowWidth = range.to - range.from;
-      const triggerThreshold = range.from + (windowWidth * 0.20); // Trigger when < 20% remains
-
-      // Alternative trigger: check if we're close to placeholders (more reliable)
       const visibleStartTime = Math.floor(range.from);
       const oldestCandleTime = candles?.length ? Math.floor(new Date(candles[0].timestamp).getTime() / 1000) : null;
-      const hasPlaceholdersNearby = oldestCandleTime && (visibleStartTime - oldestCandleTime) < 50; // Within 50 seconds of oldest data
+      const latestCandleTime = candles?.length ? Math.floor(new Date(candles[candles.length - 1].timestamp).getTime() / 1000) : null;
 
-      // Debug: show if we actually have placeholders
-      const hasVisiblePlaceholders = leftPlaceholders.some(p => p.time >= visibleStartTime && p.time <= range.to);
+      // Only trigger if user moved viewport further left than before (avoid triggering on zoom-in place)
+      const movedLeft = lastLogicalRange ? range.from < lastLogicalRange.from : false;
+
+      // Consider we're "near left edge" if start is within 50% of current window width from the oldest loaded candle
+      const nearLeftEdge = oldestCandleTime ? (visibleStartTime - oldestCandleTime) < (windowWidth * 0.5) : false;
+
+      // Avoid backfill when we're near the latest bars (zooming at the right edge)
+      const nearRightEdge = latestCandleTime ? (latestCandleTime - Math.floor(range.to)) < (windowWidth * 0.2) : false;
+
+      // Final decision
+      const shouldTriggerBackfill = movedLeft && nearLeftEdge && !nearRightEdge;
 
       console.log('Trigger check:', {
         rangeFrom: range.from,
-        triggerThreshold,
-        shouldTrigger: range.from < triggerThreshold,
+        movedLeft,
+        nearLeftEdge,
+        nearRightEdge,
         visibleStartTime,
         oldestCandleTime,
-        hasPlaceholdersNearby,
-        hasVisiblePlaceholders,
-        placeholdersCount: leftPlaceholders.length,
-        triggerPercent: '20%'
+        latestCandleTime,
+        placeholdersCount: leftPlaceholders.length
       });
 
-      // Simple trigger: just check if we're close to the left edge
-      const shouldTriggerBackfill = range.from < triggerThreshold;
-
-      console.log('Simple trigger decision:', {
-        shouldTriggerBackfill,
-        rangeFrom: range.from,
-        triggerThreshold,
-        difference: triggerThreshold - range.from, // How close we are to trigger
-        windowWidth: range.to - range.from,
-        remainingPercent: ((triggerThreshold - range.from) / (range.to - range.from)) * 100,
-        hasVisiblePlaceholders,
-        distanceFromOldest: oldestCandleTime ? oldestCandleTime - visibleStartTime : null
-      });
+      // Save last range for next comparison
+      lastLogicalRange = range;
 
       if (!shouldTriggerBackfill) {
-        console.log('❌ Backfill not triggered - not close enough to edge');
+        console.log('❌ Backfill not triggered - conditions not met');
         return;
       }
 
@@ -629,7 +646,10 @@
 
       lastTriggerTime = now;
 
-      // Execute backfill immediately without debounce for testing
+      // Capture current visible logical range to preserve viewport after prepend
+      try { prevRangeBeforeBackfill = chart.timeScale().getVisibleLogicalRange(); } catch (_) { prevRangeBeforeBackfill = null; }
+
+      // Execute backfill immediately
       console.log('🚀 EXECUTING BACKFILL IMMEDIATELY...');
       
       (async () => {
@@ -727,6 +747,16 @@
               candles = [...onlyNew, ...(candles || [])].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
               backfillCursor = candles[0].timestamp;
               updateChart({ preserveViewport: true });
+
+              // After prepending, keep the viewport anchored by shifting logical range to the right
+              if (prevRangeBeforeBackfill && onlyNew.length && chart) {
+                try {
+                  chart.timeScale().setVisibleLogicalRange({
+                    from: prevRangeBeforeBackfill.from + onlyNew.length,
+                    to: prevRangeBeforeBackfill.to + onlyNew.length,
+                  });
+                } catch (_) {}
+              }
             } else {
               // nothing new, move cursor one interval back for next attempt
               const ts = new Date(cursor).getTime() - (intervalToSec[interval] || 900) * 1000;
@@ -786,6 +816,131 @@
         link.click();
       }
     }
+  }
+
+  // 🚀 Liquidity Overlay Functions
+  function initializeLiquidityOverlay() {
+    if (!chart || liquidityOverlayActive) return;
+
+    try {
+      // Create bid series (green, negative values for left side)
+      bidSeries = chart.addHistogramSeries({
+        color: 'rgba(38, 166, 154, 0.4)',
+        priceFormat: {
+          type: 'volume',
+        },
+        priceScaleId: 'liquidity', // Use separate price scale
+      });
+
+      // Create ask series (red, positive values for right side)  
+      askSeries = chart.addHistogramSeries({
+        color: 'rgba(239, 83, 80, 0.4)',
+        priceFormat: {
+          type: 'volume',
+        },
+        priceScaleId: 'liquidity', // Use separate price scale
+      });
+
+      // Configure liquidity price scale
+      chart.priceScale('liquidity').applyOptions({
+        position: 'left',
+        scaleMargins: {
+          top: 0.7,
+          bottom: 0.1,
+        },
+        borderVisible: false,
+      });
+
+      liquidityOverlayActive = true;
+      console.log('✅ Liquidity overlay initialized');
+
+      // Load initial data
+      updateLiquidityData();
+
+    } catch (error) {
+      console.error('❌ Failed to initialize liquidity overlay:', error);
+    }
+  }
+
+  function removeLiquidityOverlay() {
+    if (!chart || !liquidityOverlayActive) return;
+
+    try {
+      if (bidSeries) {
+        chart.removeSeries(bidSeries);
+        bidSeries = null;
+      }
+      if (askSeries) {
+        chart.removeSeries(askSeries);
+        askSeries = null;
+      }
+
+      liquidityOverlayActive = false;
+      console.log('✅ Liquidity overlay removed');
+
+    } catch (error) {
+      console.error('❌ Failed to remove liquidity overlay:', error);
+    }
+  }
+
+  async function updateLiquidityData() {
+    if (!liquidityOverlayActive || !bidSeries || !askSeries) return;
+
+    try {
+      // Load current order book data
+      const { liquidityStore } = await import('../stores/liquidity.js');
+      await liquidityStore.loadCurrentOrderBook(symbol);
+      
+      // Get current order book data from store
+      const orderBook = $currentOrderBook;
+      if (!orderBook || !orderBook.bid_levels || !orderBook.ask_levels) {
+        console.log('⚠️ No order book data available');
+        return;
+      }
+
+      const currentTime = Math.floor(Date.now() / 1000);
+
+      // Create single data point for each series (TradingView format)
+      const bidData = [{
+        time: currentTime,
+        value: orderBook.total_bid_volume * 100, // Scale for visibility
+        color: 'rgba(38, 166, 154, 0.6)'
+      }];
+
+      const askData = [{
+        time: currentTime,
+        value: orderBook.total_ask_volume * 100, // Scale for visibility  
+        color: 'rgba(239, 83, 80, 0.6)'
+      }];
+
+      // Update series data
+      bidSeries.setData(bidData);
+      askSeries.setData(askData);
+
+      console.log('✅ Liquidity data updated', {
+        bidVolume: orderBook.total_bid_volume,
+        askVolume: orderBook.total_ask_volume,
+        spread: orderBook.spread,
+        timestamp: currentTime
+      });
+
+    } catch (error) {
+      console.error('❌ Failed to update liquidity data:', error);
+    }
+  }
+
+  // React to liquidity visibility changes
+  $: if (chart) {
+    if ($liquidityVisible && !liquidityOverlayActive) {
+      initializeLiquidityOverlay();
+    } else if (!$liquidityVisible && liquidityOverlayActive) {
+      removeLiquidityOverlay();
+    }
+  }
+
+  // React to order book data changes
+  $: if ($currentOrderBook && liquidityOverlayActive) {
+    updateLiquidityData();
   }
 </script>
 

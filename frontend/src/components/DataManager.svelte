@@ -129,12 +129,12 @@
 
       <div class="overview-card">
         <h4>Total Symbols</h4>
-        <p>{dataStatus.supported_symbols.length}</p>
+        <p>{(dataStatus.supported_symbols || []).length}</p>
       </div>
 
       <div class="overview-card">
         <h4>Total Intervals</h4>
-        <p>{dataStatus.supported_intervals.length}</p>
+        <p>{(dataStatus.supported_intervals || []).length}</p>
       </div>
     </div>
 
@@ -151,10 +151,10 @@
           </tr>
         </thead>
         <tbody>
-          {#each dataStatus.supported_symbols as symbol}
-            {#each dataStatus.supported_intervals as interval}
+          {#each (dataStatus.supported_symbols || []) as symbol}
+            {#each (dataStatus.supported_intervals || []) as interval}
               {@const statusKey = `${symbol}_${interval}`}
-              {@const status = dataStatus.data_status[statusKey]}
+              {@const status = (dataStatus.data_status || {})[statusKey]}
               <tr>
                 <td>{symbol}</td>
                 <td>{interval}</td>

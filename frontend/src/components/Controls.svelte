@@ -18,7 +18,7 @@
   $: availableIntervals = $configStore.availableIntervals;
 
   // Liquidity state
-  let liquidityFeatureAvailable = false;
+  let liquidityFeatureAvailable = true;
 
   // Event handlers
   function handleSymbolChange(event) {
@@ -50,32 +50,24 @@
     dispatch('backtest', params);
   }
 
-  // 🚀 Liquidity feature handlers
-  async function handleLiquidityToggle() {
-    if (!liquidityFeatureAvailable) {
-      console.warn('Liquidity feature is not available');
-      return;
+  function handleLiquidityToggle() {
+    if ($liquidityState.visible) {
+      liquidityStore.hide();
+    } else {
+      liquidityStore.show();
+      // Load liquidity data for current symbol
+      const symbol = selectedSymbol && selectedSymbol !== 'undefined' ? selectedSymbol : 'BTC/USDT';
+      liquidityStore.loadCurrentOrderBook(symbol.replace('/', ''));
     }
-
-    try {
-      if ($liquidityState.visible) {
-        liquidityStore.hide();
-        dispatch('liquidityToggled', { visible: false });
-      } else {
-        liquidityStore.show();
-        
-        // Load current order book data for the selected symbol
-        if (selectedSymbol) {
-          await liquidityStore.loadCurrentOrderBook(selectedSymbol);
-        }
-        
-        dispatch('liquidityToggled', { visible: true, symbol: selectedSymbol });
-      }
-    } catch (error) {
-      console.error('Failed to toggle liquidity:', error);
-      liquidityStore.updateStats({ error: error.message });
-    }
+    
+    // Dispatch event to notify chart about liquidity toggle
+    dispatch('liquidityToggled', { 
+      visible: !$liquidityState.visible,
+      symbol: selectedSymbol 
+    });
   }
+
+
 
   // Check liquidity feature availability on mount
   onMount(async () => {

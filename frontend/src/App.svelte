@@ -181,79 +181,21 @@
           interval={config.selectedInterval}
           bind:fullscreen={chartFullscreen}
           {loading}
-                      bind:isBackfilling
+          bind:isBackfilling
+        />
+        
+        <!-- 💧 Liquidity Widget -->
+        <div class="liquidity-widget">
+          <LiquidityChart
+            symbol={config.selectedSymbol?.replace('/', '') || 'BTCUSDT'}
+            height={300}
+            showLevels={true}
+            opacity={0.7}
+            minVolume={0.01}
+            maxLevels={15}
           />
-          <div class="liquidity-under-chart">
-            <div class="liquidity-under-chart__header">
-              <h3>💧 Liquidity Analysis</h3>
-              <div class="liquidity-controls">
-                <label class="control-item">
-                  <span class="control-label">Opacity:</span>
-                  <input
-                    type="range"
-                    min="0.1"
-                    max="1.0"
-                    step="0.05"
-                    bind:value={$liquidityStore.settings.opacity}
-                    on:input={(e) => liquidityStore.setOpacity(parseFloat(e.target.value))}
-                    class="range-input"
-                  />
-                  <span class="control-value">{Math.round($liquidityStore.settings.opacity * 100)}%</span>
-                </label>
-                
-                <label class="control-item">
-                  <span class="control-label">Min Vol:</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    bind:value={$liquidityStore.settings.minVolume}
-                    on:change={(e) => liquidityStore.setMinVolume(parseFloat(e.target.value))}
-                    class="number-input"
-                  />
-                </label>
-                
-                <label class="control-item">
-                  <span class="control-label">Max Levels:</span>
-                  <input
-                    type="number"
-                    min="5"
-                    max="50"
-                    step="1"
-                    bind:value={$liquidityStore.settings.maxLevels}
-                    on:change={(e) => liquidityStore.setMaxLevels(parseInt(e.target.value))}
-                    class="number-input"
-                  />
-                </label>
-                
-                <label class="control-item checkbox-item">
-                  <input
-                    type="checkbox"
-                    bind:checked={$liquidityStore.settings.autoUpdate}
-                    on:change={(e) => {
-                      if (e.target.checked) {
-                        liquidityStore.startAutoUpdate(config.selectedSymbol || 'BTCUSDT');
-                      } else {
-                        liquidityStore.stopAutoUpdate();
-                      }
-                    }}
-                    class="checkbox-input"
-                  />
-                  <span class="control-label">Auto-update</span>
-                </label>
-              </div>
-            </div>
-            <div class="liquidity-under-chart__content">
-              <LiquidityChart
-                symbol={config.selectedSymbol || 'BTCUSDT'}
-                height={220}
-                opacity={$liquidityStore.settings.opacity}
-                minVolume={$liquidityStore.settings.minVolume}
-                maxLevels={$liquidityStore.settings.maxLevels}
-              />
-            </div>
-          </div>
-        </section>
+        </div>
+      </section>
 
       <!-- Strategy parameters panel -->
       <aside class="strategy-panel" class:collapsed={strategyPanelCollapsed}>
@@ -696,6 +638,22 @@
   }
 
 
+
+  /* 💧 Liquidity Widget Styles */
+  .liquidity-widget {
+    margin-top: 16px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(20, 20, 20, 0.95);
+    border: 1px solid rgba(0, 188, 212, 0.2);
+    box-shadow: 0 2px 12px rgba(0, 188, 212, 0.1);
+    transition: all 0.3s ease;
+  }
+
+  .liquidity-widget:hover {
+    border-color: rgba(0, 188, 212, 0.4);
+    box-shadow: 0 4px 20px rgba(0, 188, 212, 0.15);
+  }
 
   /* Responsive design */
   @media (min-width: 768px) {

@@ -214,7 +214,25 @@ async def get_liquidity_chart_data(
         # Convert to chart format
         chart_data = []
         for snapshot in reversed(snapshots):  # Reverse to get chronological order
-            chart_point = snapshot.to_lightweight_chart_data()
+            chart_point = {
+                'time': int(snapshot.timestamp / 1000),
+                'timestamp': snapshot.timestamp,
+                'symbol': snapshot.symbol,
+                'spread': snapshot.spread,
+                'liquidity_levels': [
+                    # Bids as negative volumes (left side)
+                    *[{'price': level.get('price'), 'volume': -float(level.get('volume', 0)), 'side': 'bid'}
+                      for level in (snapshot.bid_levels or [])],
+                    # Asks as positive volumes (right side)
+                    *[{'price': level.get('price'), 'volume': float(level.get('volume', 0)), 'side': 'ask'}
+                      for level in (snapshot.ask_levels or [])]
+                ],
+                'metrics': {
+                    'total_bid_volume': snapshot.total_bid_volume,
+                    'total_ask_volume': snapshot.total_ask_volume,
+                    'spread_percentage': snapshot.spread_percentage
+                }
+            }
             
             # Filter levels by minimum volume
             if min_volume > 0:

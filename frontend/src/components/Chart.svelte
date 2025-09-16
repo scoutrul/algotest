@@ -65,6 +65,8 @@
     console.log('🔄 Completely reinitializing chart for symbol change');
     
     try {
+      const wasLiquidityActive = liquidityOverlayActive || $liquidityVisible;
+      
       // Destroy current chart completely
       if (chart) {
         chart.remove();
@@ -76,11 +78,17 @@
       leftPlaceholders = [];
       backfillCursor = null;
       reachedHistoryStart = false;
+      liquidityPriceLines = [];
+      liquidityOverlayActive = false;
       
       // Force a small delay then reinitialize
       setTimeout(() => {
         if (chartContainer) {
           initializeChart();
+          // Restore liquidity overlay after chart is recreated
+          if (wasLiquidityActive) {
+            setTimeout(() => initializeLiquidityOverlay(), 120);
+          }
           // After reinit, update with current data if available
           if (candles.length > 0) {
             setTimeout(() => {
@@ -100,6 +108,121 @@
     // Just call the full reinitialize now
     reinitializeChart();
   }
+
+  // 🚀 Liquidity Overlay Functions
+  let liquidityPriceLines = []; // Store price lines for cleanup
+  
+  function initializeLiquidityOverlay() {
+    if (!chart) return;
+    
+    try {
+      liquidityOverlayActive = true;
+      console.log('✅ Liquidity overlay initialized');
+      
+      // Load initial liquidity data
+      updateLiquidityData();
+      
+    } catch (error) {
+      console.error('❌ Failed to initialize liquidity overlay:', error);
+    }
+  }
+
+  function destroyLiquidityOverlay() {
+    // Remove all price lines
+    liquidityPriceLines.forEach(priceLine => {
+      try {
+        if (candlestickSeries && priceLine) {
+          candlestickSeries.removePriceLine(priceLine);
+        }
+      } catch (e) {}
+    });
+    liquidityPriceLines = [];
+    
+    liquidityOverlayActive = false;
+    console.log('🗑️ Liquidity overlay destroyed');
+  }
+
+  async function loadLiquidityData() {
+    if (!liquidityOverlayActive || !bidSeries || !askSeries) return;
+    
+    try {
+      // Load current order book data
+      await liquidityStore.loadCurrentOrderBook(symbol.replace('/', ''));
+      
+      // Get the order book from store
+      const orderBook = $currentOrderBook;
+      if (!orderBook) return;
+      
+      updateLiquidityOverlay(orderBook);
+      
+    } catch (error) {
+      console.error('❌ Failed to load liquidity data:', error);
+    }
+  }
+
+  // Alias function for compatibility
+  async function updateLiquidityData() {
+    await loadLiquidityData();
+  }
+
+  function updateLiquidityOverlay(orderBook) {
+    if (!liquidityOverlayActive || !candlestickSeries || !orderBook) return;
+    
+    try {
+      // Clear existing price lines
+      liquidityPriceLines.forEach(priceLine => {
+        try {
+          candlestickSeries.removePriceLine(priceLine);
+        } catch (e) {}
+      });
+      liquidityPriceLines = [];
+      
+      // Process bid levels (green horizontal lines below current price)
+      const cap = Math.min(50, (orderBook.bid_levels?.length || 0));
+      const bidLevels = orderBook.bid_levels?.slice(0, cap) || [];
+      const askCap = Math.min(50, (orderBook.ask_levels?.length || 0));
+      const askLevels = orderBook.ask_levels?.slice(0, askCap) || [];
+      
+      // Add significant bid levels as horizontal price lines
+      bidLevels.forEach((level, index) => {
+        if (level.volume > 0.5) { // Only show significant volumes
+          try {
+            const priceLine = candlestickSeries.createPriceLine({
+              price: level.price,
+              color: `rgba(76, 175, 80, ${Math.min(0.8, 0.3 + (level.volume / 10))})`,
+              lineWidth: Math.max(1, Math.min(4, level.volume / 5)),
+              lineStyle: 0, // Solid line
+              axisLabelVisible: true,
+              title: `Bid: ${level.volume.toFixed(2)}`,
+            });
+            liquidityPriceLines.push(priceLine);
+          } catch (e) {}
+        }
+      });
+      
+      // Add significant ask levels as horizontal price lines  
+      askLevels.forEach((level, index) => {
+        if (level.volume > 0.5) { // Only show significant volumes
+          try {
+            const priceLine = candlestickSeries.createPriceLine({
+              price: level.price,
+              color: `rgba(244, 67, 54, ${Math.min(0.8, 0.3 + (level.volume / 10))})`,
+              lineWidth: Math.max(1, Math.min(4, level.volume / 5)),
+              lineStyle: 0, // Solid line
+              axisLabelVisible: true,
+              title: `Ask: ${level.volume.toFixed(2)}`,
+            });
+            liquidityPriceLines.push(priceLine);
+          } catch (e) {}
+        }
+      });
+      
+      console.log(`📊 Updated liquidity overlay: ${bidLevels.length} bids, ${askLevels.length} asks, ${liquidityPriceLines.length} lines`);
+      
+    } catch (error) {
+      console.error('❌ Failed to update liquidity overlay:', error);
+    }
+  }
   
   // Reactive statements for symbol/interval changes
   $: if (chart) {
@@ -115,6 +238,22 @@
       // Completely reinitialize chart (like tab switching does)
       reinitializeChart();
     }
+  }
+
+  // Reactive statement for liquidity visibility
+  $: if (chart && $liquidityVisible !== liquidityOverlayActive) {
+    if ($liquidityVisible && !liquidityOverlayActive) {
+      console.log('🚀 Enabling liquidity overlay');
+      initializeLiquidityOverlay();
+    } else if (!$liquidityVisible && liquidityOverlayActive) {
+      console.log('🚀 Disabling liquidity overlay');
+      destroyLiquidityOverlay();
+    }
+  }
+
+  // Reactive statement for liquidity data updates
+  $: if (liquidityOverlayActive && $currentOrderBook) {
+    updateLiquidityOverlay($currentOrderBook);
   }
   
   // Separate reactive block for candle updates
@@ -819,7 +958,7 @@
   }
 
   // 🚀 Liquidity Overlay Functions
-  function initializeLiquidityOverlay() {
+  function initializeLiquidityOverlay_OLD() {
     if (!chart || liquidityOverlayActive) return;
 
     try {
@@ -862,7 +1001,7 @@
     }
   }
 
-  function removeLiquidityOverlay() {
+  function removeLiquidityOverlay_OLD() {
     if (!chart || !liquidityOverlayActive) return;
 
     try {
@@ -883,7 +1022,7 @@
     }
   }
 
-  async function updateLiquidityData() {
+  async function updateLiquidityData_OLD() {
     if (!liquidityOverlayActive || !bidSeries || !askSeries) return;
 
     try {
@@ -957,7 +1096,7 @@
       {:else if isBackfilling}
         <span class="loading-indicator backfilling">
           <div class="spinner"></div>
-          Loading historical data...
+          Loading more data...
         </span>
       {/if}
     </div>
@@ -1000,15 +1139,7 @@
       </div>
     {/if}
 
-    <!-- Backfilling indicator overlay -->
-    {#if isBackfilling && candles.length > 0}
-      <div class="backfill-indicator">
-        <div class="backfill-content">
-          <div class="spinner-small"></div>
-          <span>Loading more historical data...</span>
-        </div>
-      </div>
-    {/if}
+
   </div>
 
   <!-- Chart legend -->
@@ -1252,37 +1383,7 @@
     margin: 0 auto 1rem;
   }
 
-  /* Backfilling indicator */
-  .backfill-indicator {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    background: rgba(255, 255, 255, 0.95);
-    border: 1px solid #e0e0e0;
-    border-radius: 6px;
-    padding: 0.5rem 1rem;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    z-index: 20;
-    backdrop-filter: blur(4px);
-  }
 
-  .backfill-content {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.875rem;
-    color: #f39c12;
-    font-weight: 500;
-  }
-
-  .spinner-small {
-    width: 14px;
-    height: 14px;
-    border: 2px solid #e0e0e0;
-    border-top: 2px solid #f39c12;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
 
   @keyframes spin {
     0% { transform: rotate(0deg); }
@@ -1328,8 +1429,6 @@
       padding: 0.25rem 0.5rem;
     }
 
-    .backfill-content {
-      font-size: 0.75rem;
-    }
+
   }
 </style>

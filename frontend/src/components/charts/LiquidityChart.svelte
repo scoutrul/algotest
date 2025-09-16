@@ -28,7 +28,8 @@
 
   // Subscribe to liquidity store
   const unsubscribe = liquidityStore.subscribe(state => {
-    isVisible = state.visible && state.enabled;
+    // Widget should render whenever feature is enabled, independent of overlay toggle
+    isVisible = state.enabled;
     loading = state.loading;
     error = state.error;
     currentOrderBook = state.currentOrderBook;
@@ -202,7 +203,7 @@
   }
 
   // Reactivity
-  $: if (symbol && isVisible && isInitialized && !isDisposed) {
+  $: if (symbol && isInitialized && !isDisposed) {
     loadCurrentOrderBook();
   }
 
@@ -216,6 +217,11 @@
     if (!isDisposed && liquiditySeries) {
       try { liquiditySeries.setData([]); } catch (_) {}
     }
+  }
+
+  // Ensure the widget becomes visible by default when mounted
+  $: if (isInitialized && !isDisposed && chart && !error) {
+    try { ensureSeries(); } catch (_) {}
   }
 </script>
 

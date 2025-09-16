@@ -149,7 +149,8 @@ class OrderBookCollector:
         try:
             for snapshot in snapshots:
                 try:
-                    db.add(snapshot)
+                    # Use merge to handle detached instances
+                    db.merge(snapshot)
                     stored_count += 1
                 except IntegrityError:
                     # Skip duplicate snapshots (same symbol, exchange, timestamp)
@@ -300,7 +301,7 @@ class OrderBookCollector:
             'order_book_limit': self.order_book_limit
         }
 
-    async def test_connection(self) -> Dict[str, Any]:
+    def test_connection(self) -> Dict[str, Any]:
         """Test connection to the exchange."""
         try:
             # Test with a simple market fetch
@@ -317,14 +318,15 @@ class OrderBookCollector:
                     'markets_count': len(markets),
                     'test_symbol': test_symbol,
                     'test_orderbook_bids': len(orderbook.get('bids', [])),
-                    'test_orderbook_asks': len(orderbook.get('asks', []))
+                    'test_orderbook_asks': len(orderbook.get('asks', [])),
+                    'message': 'Connection successful and order book fetched'
                 }
             else:
                 return {
                     'success': True,
                     'exchange': self.exchange_name,
                     'markets_count': len(markets),
-                    'message': 'No symbols configured for testing'
+                    'message': 'No symbols configured for testing, but markets loaded'
                 }
                 
         except Exception as e:
@@ -356,7 +358,7 @@ async def start_background_collection():
     collector = get_collector()
     
     # Test connection first
-    test_result = await collector.test_connection()
+    test_result = collector.test_connection()
     if not test_result['success']:
         logging.getLogger(__name__).error(f"Exchange connection test failed: {test_result['error']}")
         return

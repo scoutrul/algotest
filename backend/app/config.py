@@ -84,9 +84,11 @@ class Settings:
     LIQUIDITY_EXCHANGE: str = os.getenv("LIQUIDITY_EXCHANGE", "binance")
     LIQUIDITY_SYMBOLS: List[str] = os.getenv("LIQUIDITY_SYMBOLS", "BTC/USDT,ETH/USDT,BNB/USDT").split(",")
     LIQUIDITY_COLLECTION_INTERVAL: int = int(os.getenv("LIQUIDITY_COLLECTION_INTERVAL", "30"))  # seconds
-    LIQUIDITY_ORDER_BOOK_LIMIT: int = int(os.getenv("LIQUIDITY_ORDER_BOOK_LIMIT", "20"))  # levels
+    # Collect deeper order book by default so wider price bands are visible
+    LIQUIDITY_ORDER_BOOK_LIMIT: int = int(os.getenv("LIQUIDITY_ORDER_BOOK_LIMIT", "200"))  # levels
     LIQUIDITY_HISTORY_RETENTION_DAYS: int = int(os.getenv("LIQUIDITY_HISTORY_RETENTION_DAYS", "30"))
-    LIQUIDITY_MIN_VOLUME_THRESHOLD: float = float(os.getenv("LIQUIDITY_MIN_VOLUME_THRESHOLD", "0.01"))
+    # Include smaller levels to visualize broader liquidity bands (can be tuned via env)
+    LIQUIDITY_MIN_VOLUME_THRESHOLD: float = float(os.getenv("LIQUIDITY_MIN_VOLUME_THRESHOLD", "0.001"))
     
     # Liquidity Aggregation Settings
     LIQUIDITY_AGGREGATION_INTERVALS: List[str] = ["5m", "15m", "1h", "4h", "1d"]

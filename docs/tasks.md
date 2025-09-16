@@ -82,11 +82,13 @@
 4. **Phase 7**: Production deployment
 5. **Phase 8**: Мониторинг и аналитика
 
-## PLAN: Fix Historical Backfill on Chart (Level 3)
+## COMPLETED: Fix Historical Backfill on Chart (Level 3) ✅
 
-- **Status**: Planning complete → proceed to Implement Mode
+- **Status**: COMPLETED - Implementation, Reflection, and Archive phases complete
 - **Owner**: Frontend + Backend
 - **Goal**: Восстановить автодогрузку исторических свечей при прокрутке графика влево без ломания вьюпорта и без дубликатов.
+- **Reflection**: Completed - see docs/reflection.md
+- **Archive**: Completed - see docs/archive/2025-01-16-historical-backfill-fix.md
 
 ### Requirements Analysis
 - **Функциональные**:

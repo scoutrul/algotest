@@ -78,10 +78,12 @@ class OptimizedBacktestEngine:
             # Step 1: Fetch historical data with optimization
             logger.info("Fetching historical data...")
             async with self.data_fetcher as fetcher:
+                # Use request limit or default to 1000 candles for better backfill
+                limit = request.limit or settings.DEFAULT_CANDLES_LIMIT
                 candles = await fetcher.fetch_candles(
                     request.symbol,
                     request.interval,
-                    request.strategy_params.get('lookback_period', 20) * 10  # Fetch more data for analysis
+                    limit
                 )
             
             if not candles:

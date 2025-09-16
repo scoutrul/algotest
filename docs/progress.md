@@ -23,9 +23,18 @@
 3. **Chart Library**: TradingView Lightweight Charts (профессиональные графики)
 4. **Architecture**: Модульная система (легкое расширение)
 
+### Recent Completions
+- ✅ **Historical Backfill Fix**: Successfully restored and enhanced historical data loading functionality
+  - Fixed 13-day data gap between backtest and historical data
+  - Set chart height to 500px maximum
+  - Improved cross-interval compatibility
+  - Enhanced API data fetching
+  - Archive: `docs/archive/2025-01-16-historical-backfill-fix.md`
+
 ### Next Phase Options
-1. **IMPLEMENT Mode** - для реализации спроектированных компонентов
-2. **TEST Mode** - для валидации дизайна
+1. **VAN Mode** - для инициализации следующей задачи
+2. **IMPLEMENT Mode** - для реализации спроектированных компонентов
+3. **TEST Mode** - для валидации дизайна
 
 ### Repository Structure
 ```

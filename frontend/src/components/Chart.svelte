@@ -78,24 +78,55 @@
       candlestickSeries = null;
       leftPlaceholders = [];
       backfillCursor = null;
-      reachedHistoryStart = false;
+      reachedHistoryStart = false; // Always reset history start flag
       liquidityPriceLines = [];
       liquidityOverlayActive = false;
+      
+      // Reset all backfill-related state
+      activeBackfillCount = 0;
+      lastRequestedCursor = null;
+      pendingBackfill = null;
+      isLoadingMore = false;
+      lastTriggerTime = 0;
+      lastLogicalRange = null;
+      initialLoadComplete = false; // Reset this too for fresh start
+      
+      // Clear any pending timers
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+      
+      // Reset tracking variables to prevent immediate re-trigger
+      prevInterval = null;
+      prevSymbol = null;
       
       // Force a small delay then reinitialize
       setTimeout(() => {
         if (chartContainer) {
           initializeChart();
+          
+          // Set tracking variables after chart is created
+          prevInterval = interval;
+          prevSymbol = symbol;
+          
+          // Setup backfill after chart is created
+          setupBackfill();
+          
           // Restore liquidity overlay after chart is recreated
           if (wasLiquidityActive) {
             setTimeout(() => initializeLiquidityOverlay(), 120);
           }
-          // After reinit, update with current data if available
-          if (candles.length > 0) {
-            setTimeout(() => {
-              updateChart({ preserveViewport: false });
-            }, 100);
-          }
+          // After reinit, trigger data reload from App.svelte
+          // This will cause App.svelte to call updateChartData with new symbol/interval
+          setTimeout(() => {
+            // Set initialLoadComplete to true after reinitialization
+            initialLoadComplete = true;
+            console.log('Chart reinitialized, initialLoadComplete set to true');
+            
+            // Dispatch event to trigger data reload in App.svelte
+            dispatch('reloadData', { symbol, interval });
+          }, 100);
         }
       }, 50);
       
@@ -275,10 +306,17 @@
     // Mark initial load completed once real candles are in
     if (!initialLoadComplete) initialLoadComplete = true;
     
-    // Set backfill cursor if not set yet
+    // Set backfill cursor if not set yet - use the OLDEST candle timestamp for backfill
     if (!backfillCursor) {
-      backfillCursor = candles[0].timestamp;
-      console.log('Setting backfill cursor from reactive data:', backfillCursor);
+      // For backfill, we need to request data BEFORE the oldest candle
+      // So we set cursor to the oldest candle timestamp
+      backfillCursor = candles[0].timestamp; // candles[0] is the oldest candle
+      console.log('Setting backfill cursor from reactive data (oldest candle):', backfillCursor);
+      console.log('Candles range:', {
+        oldest: candles[0]?.timestamp,
+        newest: candles[candles.length - 1]?.timestamp,
+        count: candles.length
+      });
     }
     
     // If symbol/interval matches current, it's new data for current symbol
@@ -286,7 +324,7 @@
       updateChart({ preserveViewport: true });
     } else {
       // This is new data for a different symbol - reset viewport
-      updateChart({ preserveViewport: false });
+      updateChart({ preserveViewport: true }); // TEMPORARILY CHANGED: was false
     }
   }
 
@@ -379,6 +417,13 @@
     if (!chartContainer) return;
 
     if (!createChartFn) return;
+    
+    // Reset backfill state when initializing new chart
+    console.log('🔄 Initializing new chart, resetting backfill state');
+    reachedHistoryStart = false;
+    backfillCursor = null;
+    lastRequestedCursor = null;
+    isLoadingMore = false;
     // Create chart
     chart = createChartFn(chartContainer, {
       width: chartContainer.clientWidth,
@@ -438,6 +483,10 @@
       width: chartContainer.clientWidth || 800,
       height: initialHeight,
     });
+    
+    // Set tracking variables after chart is created
+    prevInterval = interval;
+    prevSymbol = symbol;
   }
 
   function setupResizeObserver() {
@@ -494,7 +543,7 @@
     }
   }
 
-  function updateChart({ preserveViewport = false } = {}) {
+  function updateChart({ preserveViewport = true } = {}) { // TEMPORARILY CHANGED: was false
     if (!candlestickSeries) return;
 
     // Convert candles to chart format (real data only)
@@ -509,9 +558,23 @@
     // Update backfill cursor to oldest candle
     backfillCursor = candles && candles.length ? candles[0].timestamp : backfillCursor;
 
-    // Strictly increasing time with only real candles
+    // Combine real data with placeholders for seamless chart display
+    // Use the oldest real candle's open price for placeholders to maintain visual continuity
+    const oldestPrice = realData.length > 0 ? realData[0].open : 0;
+    const placeholderData = (leftPlaceholders || []).map(p => ({
+      time: p.time,
+      open: oldestPrice,
+      high: oldestPrice,
+      low: oldestPrice,
+      close: oldestPrice,
+    }));
+
+    // Combine and sort all data (placeholders + real candles)
+    const allData = [...placeholderData, ...realData].sort((a,b) => a.time - b.time);
+
+    // Strictly increasing time with all data
     const seen = new Set();
-    const chartData = realData.filter(d => {
+    const chartData = allData.filter(d => {
       if (seen.has(d.time)) return false;
       seen.add(d.time);
       return true;
@@ -520,60 +583,61 @@
     // Update candlestick series without changing viewport
     candlestickSeries.setData(chartData);
 
-    if (!preserveViewport && realData.length) {
-      // Reset both time and price scales when viewport needs reset
-      chart.timeScale().fitContent();
-      
-      // Force price scale to fit the new data range
-      try {
-        // Get price scale and reset its auto-scaling
-        const priceScale = chart.priceScale('right');
-        if (priceScale) {
-          // Force recalculation of price range
-          priceScale.applyOptions({
-            autoScale: true,
-            scaleMargins: {
-              top: 0.1,    // 10% margin at top
-              bottom: 0.1  // 10% margin at bottom
-            }
-          });
-        }
-        
-        // Additional method: use series price range if available
-        if (candlestickSeries && realData.length > 0) {
-          // Calculate min/max from actual data
-          const prices = realData.flatMap(d => [d.high, d.low]);
-          const minPrice = Math.min(...prices);
-          const maxPrice = Math.max(...prices);
-          
-          console.log(`Price range for ${symbol}: ${minPrice.toFixed(2)} - ${maxPrice.toFixed(2)}`);
-          
-          // Force visible range to match data range with margins
-          const margin = (maxPrice - minPrice) * 0.1; // 10% margin
-          try {
-            // Force price scale to auto-fit the new range
-            const priceScale = chart.priceScale('right');
-            if (priceScale) {
-              // Reset price scale options to force recalculation
-              priceScale.applyOptions({
-                autoScale: true,
-                scaleMargins: {
-                  top: 0.1,
-                  bottom: 0.1,
-                },
-              });
-            }
-            // Force time scale to fit content which triggers price scale recalculation
-            chart.timeScale().fitContent();
-          } catch (e) {
-            console.log('Using fallback price scale method:', e);
-            chart.timeScale().fitContent();
-          }
-        }
-      } catch (error) {
-        console.warn('Failed to reset price scale:', error);
-      }
-    }
+    // TEMPORARILY DISABLED: Auto-focus logic that conflicts with backfill
+    // if (!preserveViewport && realData.length) {
+    //   // Reset both time and price scales when viewport needs reset
+    //   chart.timeScale().fitContent();
+    //   
+    //   // Force price scale to fit the new data range
+    //   try {
+    //     // Get price scale and reset its auto-scaling
+    //     const priceScale = chart.priceScale('right');
+    //     if (priceScale) {
+    //       // Force recalculation of price range
+    //       priceScale.applyOptions({
+    //         autoScale: true,
+    //         scaleMargins: {
+    //           top: 0.1,    // 10% margin at top
+    //           bottom: 0.1  // 10% margin at bottom
+    //         }
+    //       });
+    //     }
+    //     
+    //     // Additional method: use series price range if available
+    //     if (candlestickSeries && realData.length > 0) {
+    //       // Calculate min/max from actual data
+    //       const prices = realData.flatMap(d => [d.high, d.low]);
+    //       const minPrice = Math.min(...prices);
+    //       const maxPrice = Math.max(...prices);
+    //       
+    //       console.log(`Price range for ${symbol}: ${minPrice.toFixed(2)} - ${maxPrice.toFixed(2)}`);
+    //       
+    //       // Force visible range to match data range with margins
+    //       const margin = (maxPrice - minPrice) * 0.1; // 10% margin
+    //       try {
+    //         // Force price scale to auto-fit the new range
+    //         const priceScale = chart.priceScale('right');
+    //         if (priceScale) {
+    //           // Reset price scale options to force recalculation
+    //           priceScale.applyOptions({
+    //             autoScale: true,
+    //             scaleMargins: {
+    //               top: 0.1,
+    //               bottom: 0.1,
+    //             },
+    //           });
+    //         }
+    //         // Force time scale to fit content which triggers price scale recalculation
+    //         chart.timeScale().fitContent();
+    //       } catch (e) {
+    //         console.log('Using fallback price scale method:', e);
+    //         chart.timeScale().fitContent();
+    //       }
+    //     }
+    //   } catch (error) {
+    //     console.warn('Failed to reset price scale:', error);
+    //   }
+    // }
   }
 
   function updateTradeMarkers() {
@@ -622,13 +686,17 @@
   }
 
   async function performAutomaticBackfill(maxRequests = 2) {
+    // For 1-minute intervals, allow more requests to get more data
+    const actualMaxRequests = interval === '1m' ? 5 : maxRequests;
+    
     console.log('performAutomaticBackfill called with:', {
       chart: !!chart,
       initialLoadComplete,
       reachedHistoryStart,
       candlesLength: candles?.length || 0,
       backfillCursor,
-      maxRequests
+      maxRequests: actualMaxRequests,
+      interval
     });
 
     if (!chart || reachedHistoryStart) {
@@ -636,11 +704,14 @@
       return;
     }
 
-    console.log(`Starting automatic backfill with max ${maxRequests} requests`);
+    console.log(`Starting automatic backfill with max ${actualMaxRequests} requests`);
+    
+    let failedAttempts = 0;
+    const maxFailedAttempts = 3;
 
-    for (let i = 0; i < maxRequests; i++) {
+    for (let i = 0; i < actualMaxRequests; i++) {
       if (activeBackfillCount >= MAX_CONCURRENT_BACKFILLS || reachedHistoryStart) {
-        console.log(`Automatic backfill stopped at request ${i + 1}/${maxRequests}`);
+        console.log(`Automatic backfill stopped at request ${i + 1}/${actualMaxRequests}`);
         break;
       }
 
@@ -651,125 +722,170 @@
       if (lastRequestedCursor === cursor) break;
 
       try {
-        console.log(`Automatic backfill request ${i + 1}/${maxRequests} for cursor:`, cursor);
+        console.log(`Automatic backfill request ${i + 1}/${actualMaxRequests} for cursor:`, cursor);
 
         activeBackfillCount++;
         isLoadingMore = true;
         lastRequestedCursor = cursor;
 
-        // Fetch older data using end_time (get data BEFORE cursor)
+        // Fetch older data using only end_time (get data BEFORE a much earlier time)
+        // Calculate a time that's much earlier than cursor to ensure we get historical data
+        const cursorTime = new Date(cursor);
+        // For 1-minute intervals, go back much further to get more data
+        // Need to go back far enough to bridge the gap between backtest and historical data
+        const stepBack = interval === '1m' ? 50000 : 10; // 50000 intervals for 1m (~34.7 days), 10 for others
+        const olderTime = new Date(cursorTime.getTime() - (intervalToSec[interval] || 900) * 1000 * stepBack);
+        
+        console.log(`Requesting historical data for ${symbol} ${interval} before ${cursor}`);
+        console.log(`Going back ${stepBack} intervals to ${olderTime.toISOString()}`);
+        
+        // Request historical data using end_time (data before this time)
         const older = await apiClient.getCandles({
           symbol,
           interval,
-          end_time: cursor,
+          end_time: olderTime.toISOString(), // Use much earlier time as end_time
           limit: 1000
         });
 
         if (older && older.length) {
+          // Convert datetime timestamps to ISO strings for consistency
+          const processedOlder = older.map(candle => ({
+            ...candle,
+            timestamp: typeof candle.timestamp === 'string' ? candle.timestamp : candle.timestamp.toISOString()
+          }))
+          .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)); // Sort by timestamp to ensure chronological order
+          
+          // Debug: Log what we got from API
+          console.log(`API returned ${processedOlder.length} candles:`, {
+            first: processedOlder[0]?.timestamp,
+            last: processedOlder[processedOlder.length - 1]?.timestamp,
+            cursor: cursor
+          });
+          
+          // Filter out any data that's not older than the cursor (API might return future data)
+          const historicalData = processedOlder.filter(candle => new Date(candle.timestamp) < new Date(cursor));
+          
+          // Check if we have any data after filtering
+          let finalData;
+          if (historicalData.length === 0) {
+            console.warn(`No historical data found after filtering. API returned ${processedOlder.length} candles, but none were older than cursor ${cursor}`);
+            console.log(`First API candle: ${processedOlder[0]?.timestamp}, Last API candle: ${processedOlder[processedOlder.length - 1]?.timestamp}`);
+            
+            // Try with an even older time for all intervals
+            const ts = new Date(cursor).getTime() - (intervalToSec[interval] || 900) * 1000 * 2000; // Go back 2000 intervals
+            backfillCursor = new Date(ts).toISOString();
+            lastRequestedCursor = backfillCursor;
+            console.log(`Trying with much older time: ${backfillCursor}`);
+            continue;
+          } else {
+            finalData = historicalData;
+          }
+          
           // Replace matching placeholders by time
-          const olderTimes = new Set(older.map(c => Math.floor(new Date(c.timestamp).getTime() / 1000)));
+          const olderTimes = new Set(finalData.map(c => Math.floor(new Date(c.timestamp).getTime() / 1000)));
           leftPlaceholders = leftPlaceholders.filter(p => !olderTimes.has(p.time));
 
           // Prepend new real candles (filter out duplicates)
           const existing = new Set((candles || []).map(c => new Date(c.timestamp).getTime()));
-          const onlyNew = older.filter(c => !existing.has(new Date(c.timestamp).getTime()));
+          const onlyNew = finalData.filter(c => !existing.has(new Date(c.timestamp).getTime()));
+
+          // Additional check: ensure new candles are actually older than existing ones
+          if (onlyNew.length && candles && candles.length > 0) {
+            const oldestExisting = new Date(candles[0].timestamp).getTime();
+            const newestNew = new Date(onlyNew[onlyNew.length - 1].timestamp).getTime();
+            const intervalMs = (intervalToSec[interval] || 900) * 1000;
+            
+            // Check if there's a reasonable gap (not too large)
+            const gap = oldestExisting - newestNew;
+            // For 1-minute intervals, allow much larger gaps (up to 30 days)
+            const maxGap = interval === '1m' ? intervalMs * 43200 : intervalMs * 50; // 50 intervals for others, 43200 for 1m (30 days)
+            
+            if (newestNew >= oldestExisting) {
+              console.warn(`New candles are not older than existing! Newest new: ${onlyNew[onlyNew.length - 1].timestamp}, Oldest existing: ${candles[0].timestamp}`);
+              // For 1-minute intervals, try with a much older time to get truly historical data
+              const stepBackMultiplier = interval === '1m' ? 2000 : 20; // Go back much further for 1m
+              const ts = new Date(cursor).getTime() - (intervalToSec[interval] || 900) * 1000 * stepBackMultiplier;
+              backfillCursor = new Date(ts).toISOString();
+              lastRequestedCursor = backfillCursor; // Set to new cursor to prevent immediate retry
+              console.log(`Trying with much older time: ${backfillCursor}`);
+              continue;
+            } else if (gap > maxGap) {
+              console.warn(`Gap too large between new and existing data! Gap: ${gap}ms (${Math.round(gap / intervalMs)} intervals), max allowed: ${maxGap}ms`);
+              // Skip this batch and try with a closer time
+              const ts = new Date(cursor).getTime() - (intervalToSec[interval] || 900) * 1000 * 5; // Go back only 5 intervals
+              backfillCursor = new Date(ts).toISOString();
+              lastRequestedCursor = backfillCursor; // Set to new cursor to prevent immediate retry
+              // Don't mark as reached history start - just try with closer time
+              console.log('Trying with closer time due to large gap');
+              continue;
+            }
+          }
 
           if (onlyNew.length) {
             console.log(`Automatic backfill: adding ${onlyNew.length} candles from batch ${i + 1}`);
             
-            // Store current viewport before adding new candles
-            const currentRange = chart.timeScale().getVisibleLogicalRange();
+            // Reset failed attempts counter on successful data retrieval
+            failedAttempts = 0;
             
-            // Add new candles and sort, then find where they were inserted
-            const oldCandlesCount = (candles || []).length;
-            const oldCandles = [...(candles || [])];
-            candles = [...onlyNew, ...(candles || [])].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
-            const newCandlesCount = candles.length;
-            const actuallyAdded = newCandlesCount - oldCandlesCount;
+            // Log the range of new candles
+            const newCandles = onlyNew.sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+            console.log(`New candles range: ${newCandles[0].timestamp} to ${newCandles[newCandles.length - 1].timestamp}`);
             
-            // Find how many candles were added to the left of the current view
-            let addedToLeft = 0;
-            if (oldCandles.length > 0 && candles.length > 0) {
-              const firstOldTime = new Date(oldCandles[0].timestamp).getTime();
-              const firstNewTime = new Date(candles[0].timestamp).getTime();
-              
-              // If the first candle is older than the first old candle, we added to the left
-              if (firstNewTime < firstOldTime) {
-                addedToLeft = actuallyAdded;
-              } else {
-                // Check if we added to the right (which shouldn't happen in backfill)
-                const lastOldTime = new Date(oldCandles[oldCandles.length - 1].timestamp).getTime();
-                const lastNewTime = new Date(candles[candles.length - 1].timestamp).getTime();
-                if (lastNewTime > lastOldTime) {
-                  console.warn('New candles added to the right instead of left - this is not historical backfill');
-                  addedToLeft = 0;
-                } else {
-                  // Candles were added in the middle, which is also wrong for backfill
-                  console.warn('New candles added in the middle instead of left - this is not historical backfill');
-                  addedToLeft = 0;
+            // Log current candles range before adding
+            if (candles && candles.length > 0) {
+              console.log(`Current candles range: ${candles[0].timestamp} to ${candles[candles.length - 1].timestamp}`);
+            }
+            
+            candles = [...newCandles, ...(candles || [])].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+            
+            // Log final candles range after adding
+            console.log(`Final candles range: ${candles[0].timestamp} to ${candles[candles.length - 1].timestamp}`);
+            
+            // Check for gaps in the data
+            if (candles.length > 1) {
+              const intervalMs = (intervalToSec[interval] || 900) * 1000;
+              for (let i = 1; i < Math.min(candles.length, 10); i++) {
+                const prevTime = new Date(candles[i-1].timestamp).getTime();
+                const currTime = new Date(candles[i].timestamp).getTime();
+                const expectedTime = prevTime + intervalMs;
+                const gap = currTime - expectedTime;
+                if (Math.abs(gap) > intervalMs * 0.1) { // 10% tolerance
+                  console.warn(`Gap detected at index ${i}: expected ${new Date(expectedTime).toISOString()}, got ${candles[i].timestamp}, gap: ${gap}ms`);
                 }
               }
             }
             
-            console.log(`Backfill: added ${actuallyAdded} candles (expected ${onlyNew.length}), total: ${oldCandlesCount} -> ${newCandlesCount}`);
-            console.log(`Added to left: ${addedToLeft} candles`);
-            
-            // Verify that new candles are at the beginning
-            if (candles.length > 0) {
-              const oldestCandle = candles[0];
-              const newestCandle = candles[candles.length - 1];
-              console.log(`Candles range: ${oldestCandle.timestamp} (oldest) to ${newestCandle.timestamp} (newest)`);
-              
-              // Show first few and last few candles for debugging
-              console.log(`First 3 candles:`, candles.slice(0, 3).map(c => c.timestamp));
-              console.log(`Last 3 candles:`, candles.slice(-3).map(c => c.timestamp));
-            }
-            
-            const prevCursor = backfillCursor;
-            
-            // Only update backfillCursor if we actually added candles to the left
-            if (addedToLeft > 0) {
-              backfillCursor = candles[0].timestamp;
-              console.log(`Updated backfillCursor to: ${backfillCursor}`);
-            } else {
-              console.warn('Not updating backfillCursor - no candles added to the left');
-            }
-            
-            // Reset request guard if cursor changed
-            if (prevCursor !== backfillCursor) {
-              lastRequestedCursor = null;
-            }
+            // Set backfill cursor to the oldest candle (first in sorted array)
+            backfillCursor = candles[0].timestamp;
             ensureLeftBuffer(500);
-            
-            // Update chart data first
             updateChart({ preserveViewport: true });
-
-            // Shift viewport to the right by the number of candles added to the left
-            if (currentRange && addedToLeft > 0 && chart) {
-              try {
-                const newRange = {
-                  from: currentRange.from + addedToLeft,
-                  to: currentRange.to + addedToLeft,
-                };
-                console.log(`Shifting viewport: ${currentRange.from}-${currentRange.to} -> ${newRange.from}-${newRange.to} (added ${addedToLeft} candles to left)`);
-                chart.timeScale().setVisibleLogicalRange(newRange);
-              } catch (e) {
-                console.warn('Failed to shift viewport:', e);
-              }
-            } else if (addedToLeft === 0 && actuallyAdded > 0) {
-              console.warn('Not shifting viewport - no candles added to the left, but viewport shift would be needed');
-            }
           } else {
             // Nothing new, move cursor one interval back
             const ts = new Date(cursor).getTime() - (intervalToSec[interval] || 900) * 1000;
             backfillCursor = new Date(ts).toISOString();
-            // Reset request guard to allow retry with shifted cursor
-            lastRequestedCursor = null;
+            console.log(`No new data found, moving cursor back to: ${backfillCursor}`);
+            // Set request guard to prevent immediate retry with same cursor
+            lastRequestedCursor = backfillCursor;
           }
         } else {
-          reachedHistoryStart = true;
-          console.log('Automatic backfill: reached history start');
-          break;
+          // No data returned - increment failed attempts
+          failedAttempts++;
+          console.log(`No data returned, failed attempts: ${failedAttempts}/${maxFailedAttempts}`);
+          
+          if (failedAttempts >= maxFailedAttempts) {
+            reachedHistoryStart = true;
+            console.log('Reached max failed attempts, marking as reached history start');
+            isLoadingMore = false;
+            activeBackfillCount = Math.max(0, activeBackfillCount - 1);
+            break;
+          }
+          
+          // Try with a much older time
+          const ts = new Date(cursor).getTime() - (intervalToSec[interval] || 900) * 1000 * 100; // Go back 100 intervals
+          backfillCursor = new Date(ts).toISOString();
+          lastRequestedCursor = backfillCursor; // Set to new cursor to prevent immediate retry
+          console.log('Trying with much older time');
+          continue;
         }
 
         // Small delay between requests to prevent overwhelming the server
@@ -777,6 +893,9 @@
 
       } catch (e) {
         console.warn(`Automatic backfill error on request ${i + 1}:`, e);
+        // Reset loading state on error
+        isLoadingMore = false;
+        activeBackfillCount = Math.max(0, activeBackfillCount - 1);
         break;
       } finally {
         isLoadingMore = false;
@@ -790,16 +909,15 @@
   function setupBackfill() {
     if (!chart) return;
 
-    console.log('Setting up backfill for', symbol, interval);
+    console.log('Setting up backfill for', symbol, interval, 'initialLoadComplete:', initialLoadComplete);
 
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       // Guard against null/undefined range or missing properties
-      if (!range || range.from == null || range.to == null || reachedHistoryStart) {
+      if (!range || range.from == null || range.to == null) {
         console.log('Viewport change ignored:', { 
           noRange: !range, 
           invalidFrom: range?.from == null,
-          invalidTo: range?.to == null,
-          reachedHistoryStart 
+          invalidTo: range?.to == null
         });
         return;
       }
@@ -834,9 +952,21 @@
       // Add minimum movement threshold to prevent micro-movements from triggering backfill
       const significantMovement = lastLogicalRange ? Math.abs(range.from - lastLogicalRange.from) > (windowWidth * 0.05) : true;
 
-      // "Near left edge" if start is within 50% of current window width from the oldest loaded bar
-      const nearLeftEdge = (visibleStartIdx - oldestBarIdx) < (windowWidth * 0.5);
-      const veryCloseLeft = (visibleStartIdx - oldestBarIdx) < (windowWidth * 0.1);
+        // "Near left edge" if start is within 50% of current window width from the oldest loaded bar
+        // For backfill, we want to trigger when user scrolls close to the left edge of the data
+        const nearLeftEdge = visibleStartIdx < (windowWidth * 0.5);
+        const veryCloseLeft = visibleStartIdx < (windowWidth * 0.1);
+      
+      // Debug logging for edge detection
+      console.log('Edge detection:', {
+        visibleStartIdx,
+        oldestBarIdx,
+        windowWidth,
+        nearLeftEdge,
+        veryCloseLeft,
+        distanceFromLeft: visibleStartIdx - oldestBarIdx,
+        threshold: windowWidth * 0.3
+      });
 
       // Avoid backfill when we're near the latest bars (zooming at the right edge)
       const nearRightEdge = false; // do not block by right edge
@@ -857,7 +987,11 @@
         movedLeft,
         significantMovement,
         nearLeftEdge,
-        nearRightEdge
+        nearRightEdge,
+        initialLoadComplete,
+        backfillCooldownPassed,
+        timeSinceLastBackfill: currentTime - lastTriggerTime,
+        shouldTrigger: initialLoadComplete && nearLeftEdge && (movedLeft || veryCloseLeft || significantMovement) && backfillCooldownPassed
       });
 
       if (!shouldTriggerBackfill) {
@@ -871,21 +1005,25 @@
     });
   }
 
-  // React to interval change: reset buffers and reload
-  $: if (chart && interval) {
-    // whenever interval changes externally, reload data
-    // (simple heuristic: if candles exist and their spacing mismatches selected interval)
-    activeBackfillCount = 0; // Reset backfill counter on interval change
-    reachedHistoryStart = false;
-    lastRequestedCursor = null;
-    backfillCursor = null; // Reset backfill cursor too
-    pendingBackfill = null;
-    initialLoadComplete = false;
-    lastTriggerTime = 0; // Reset trigger timing
-    if (debounceTimer) {
-      clearTimeout(debounceTimer);
-      debounceTimer = null;
+  // Track previous values to detect changes
+  let prevInterval = null;
+  let prevSymbol = null;
+  
+  // React to interval/symbol change: reset buffers and reload
+  $: if (chart && ((interval !== prevInterval) || (symbol !== prevSymbol))) {
+    // Only reinitialize if values actually changed
+    if (prevInterval !== null || prevSymbol !== null) {
+      console.log('🔄 Interval/symbol change detected, forcing chart reinitialization');
+      console.log(`Previous: interval=${prevInterval}, symbol=${prevSymbol}`);
+      console.log(`Current: interval=${interval}, symbol=${symbol}`);
+      
+      // Force complete chart reinitialization like tab switching
+      reinitializeChart();
     }
+    
+    // Update previous values
+    prevInterval = interval;
+    prevSymbol = symbol;
   }
 
   function toggleFullscreen() {
@@ -1125,7 +1263,7 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    max-height: 100vh;
+    max-height: 500px;
     background: white;
   }
 
@@ -1207,7 +1345,7 @@
   .chart-wrapper {
     flex: 1;
     position: relative;
-    min-height: 400px;
+    min-height: 500px;
     height: 100%;
     overflow: hidden;
   }

@@ -203,8 +203,9 @@ class DataFetcher:
                 since = int(start_time.timestamp() * 1000)
             elif end_time:
                 # If only end_time provided, calculate since as end_time - limit * interval_duration
+                # But go back much further to ensure we get historical data
                 interval_seconds = self._get_interval_seconds(interval)
-                since_timestamp = end_time.timestamp() - (limit * interval_seconds)
+                since_timestamp = end_time.timestamp() - (limit * interval_seconds * 2)  # Go back 2x further
                 since = int(since_timestamp * 1000)
 
             ohlcv = await asyncio.get_event_loop().run_in_executor(

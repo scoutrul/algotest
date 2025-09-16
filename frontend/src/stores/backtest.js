@@ -104,12 +104,19 @@ function createBacktestStore() {
       try {
         const { apiClient } = await import('../utils/api.js');
         const result = await apiClient.runBacktest(params);
-        if ((!result.trades || result.trades.length === 0) && result.candles && result.candles.length) {
-          const trades = generateMockTrades(result.candles, params.take_profit ?? 0.02, params.stop_loss ?? 0.01);
+        
+        // Convert datetime timestamps to ISO strings for Chart.svelte compatibility
+        const processedCandles = (result.candles || []).map(candle => ({
+          ...candle,
+          timestamp: typeof candle.timestamp === 'string' ? candle.timestamp : candle.timestamp.toISOString()
+        }));
+        
+        if ((!result.trades || result.trades.length === 0) && processedCandles && processedCandles.length) {
+          const trades = generateMockTrades(processedCandles, params.take_profit ?? 0.02, params.stop_loss ?? 0.01);
           const statistics = computeMockStats(trades, params.initial_capital ?? 10000);
           update(state => ({
             ...state,
-            candles: result.candles,
+            candles: processedCandles,
             trades,
             statistics,
             parameters: params,
@@ -118,11 +125,11 @@ function createBacktestStore() {
             error: null,
             loading: false
           }));
-          return { candles: result.candles, trades, statistics, success: true };
+          return { candles: processedCandles, trades, statistics, success: true };
         }
         update(state => ({
           ...state,
-          candles: result.candles || [],
+          candles: processedCandles,
           trades: result.trades || [],
           statistics: result.statistics || null,
           parameters: result.parameters || null,

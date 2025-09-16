@@ -101,7 +101,10 @@
         ...config.strategyParams
       });
       
-      const candles = Array.isArray(result?.candles) ? result.candles : [];
+      const candles = Array.isArray(result?.candles) ? result.candles.map(candle => ({
+        ...candle,
+        timestamp: typeof candle.timestamp === 'string' ? candle.timestamp : candle.timestamp.toISOString()
+      })) : [];
       backtestStore.updateCandles(candles);
       
       // Stop loading immediately after successful update
@@ -133,6 +136,13 @@
     console.log('Liquidity toggled:', event.detail);
     // The store is already updated by the Controls component
     // Chart.svelte will react to the store changes automatically
+  }
+
+  // Handle chart reload request (after reinitialization)
+  async function handleChartReload(event) {
+    console.log('Chart requested data reload:', event.detail);
+    const { symbol, interval } = event.detail;
+    await updateChartData(symbol, interval);
   }
 </script>
 
@@ -186,6 +196,7 @@
           bind:fullscreen={chartFullscreen}
           {loading}
           bind:isBackfilling
+          on:reloadData={handleChartReload}
         />
         
         <!-- 💧 Liquidity Widget -->
@@ -474,175 +485,7 @@
     100% { transform: rotate(360deg); }
   }
 
-  /* 💧 Liquidity Layout Styles */
-
-
-  /* 💧 Liquidity Layout Styles */
-  .liquidity-under-chart {
-    margin-top: 12px;
-    background: rgba(0, 0, 0, 0.25);
-    border: 1px solid rgba(0, 188, 212, 0.25);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-  .liquidity-under-chart__header {
-    padding: 8px 12px;
-    border-bottom: 1px solid rgba(0, 188, 212, 0.2);
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-  .liquidity-under-chart__header h3 {
-    margin: 0;
-    font-size: 14px;
-    color: #00bcd4;
-    font-weight: 600;
-    flex-shrink: 0;
-  }
-  .liquidity-under-chart__content {
-    padding: 8px 8px 0 8px;
-  }
-
-  /* Liquidity Controls */
-  .liquidity-controls {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 8px 12px;
-    align-items: center;
-    min-width: 0;
-    flex: 1;
-  }
-
-  .control-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: #bbb;
-    min-width: 0;
-    background: rgba(0, 0, 0, 0.2);
-    padding: 4px 6px;
-    border-radius: 4px;
-    border: 1px solid rgba(0, 188, 212, 0.1);
-  }
-
-  .control-label {
-    white-space: nowrap;
-    font-weight: 500;
-    font-size: 10px;
-    min-width: max-content;
-  }
-
-  .control-value {
-    min-width: 35px;
-    text-align: center;
-    color: #00bcd4;
-    font-weight: 600;
-    font-size: 10px;
-    background: rgba(0, 188, 212, 0.1);
-    padding: 1px 4px;
-    border-radius: 2px;
-  }
-
-  .range-input {
-    width: 50px;
-    height: 4px;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 2px;
-    outline: none;
-    cursor: pointer;
-    flex: 1;
-    min-width: 40px;
-  }
-
-  .range-input::-webkit-slider-thumb {
-    appearance: none;
-    width: 10px;
-    height: 10px;
-    background: #00bcd4;
-    border-radius: 50%;
-    cursor: pointer;
-  }
-
-  .number-input {
-    width: 45px;
-    padding: 2px 4px;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(0, 188, 212, 0.3);
-    border-radius: 3px;
-    color: #fff;
-    font-size: 10px;
-    text-align: center;
-    flex-shrink: 0;
-  }
-
-  .number-input:focus {
-    outline: none;
-    border-color: #00bcd4;
-    box-shadow: 0 0 4px rgba(0, 188, 212, 0.3);
-  }
-
-  .checkbox-item {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    justify-content: flex-start;
-  }
-
-  .checkbox-input {
-    width: 12px;
-    height: 12px;
-    accent-color: #00bcd4;
-    flex-shrink: 0;
-  }
-
-  /* Responsive adjustments */
-  @media (max-width: 1024px) {
-    .liquidity-controls {
-      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-      gap: 6px 8px;
-    }
-    .control-item {
-      padding: 3px 4px;
-    }
-  }
-
-  /* Responsive design for liquidity layout */
-  @media (max-width: 1200px) {
-    .liquidity-layout {
-      grid-template-columns: 1fr;
-      grid-template-rows: 1fr auto;
-      grid-template-areas: 
-        "chart"
-        "panel";
-    }
-    
-    .liquidity-panel-section {
-      max-height: 50vh;
-    }
-  }
-
-  @media (max-width: 768px) {
-    .section-header {
-      padding: 16px;
-      flex-direction: column;
-      gap: 12px;
-      align-items: flex-start;
-    }
-    
-    .section-title {
-      font-size: 20px;
-    }
-    
-    .chart-container {
-      padding: 16px;
-    }
-  }
-
-
-
+  
   /* 💧 Liquidity Widget Styles */
   .liquidity-widget {
     margin-top: 16px;

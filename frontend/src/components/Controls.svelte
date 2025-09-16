@@ -19,11 +19,15 @@
   function handleSymbolChange(event) {
     selectedSymbol = event.target.value;
     configStore.setSelectedSymbol(selectedSymbol);
+    // Dispatch event to update chart data only (no backtest)
+    dispatch('symbolChanged', { symbol: selectedSymbol, interval: selectedInterval });
   }
 
   function handleIntervalChange(event) {
     selectedInterval = event.target.value;
     configStore.setSelectedInterval(selectedInterval);
+    // Dispatch event to update chart data only (no backtest)
+    dispatch('intervalChanged', { symbol: selectedSymbol, interval: selectedInterval });
   }
 
   function handleQuickBacktest() {

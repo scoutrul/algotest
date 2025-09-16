@@ -58,6 +58,46 @@
     }
   }
 
+  // Handle symbol/interval changes (update chart data only)
+  async function handleSymbolChanged(event) {
+    await updateChartData(event.detail.symbol, event.detail.interval);
+  }
+
+  async function handleIntervalChanged(event) {
+    await updateChartData(event.detail.symbol, event.detail.interval);
+  }
+
+  // Update chart data without running backtest
+  async function updateChartData(symbol, interval) {
+    loading = true;
+    error = null;
+    
+    try {
+      // First clear old data immediately
+      backtestStore.updateCandles([]);
+      backtestStore.updateTrades([]);
+      backtestStore.updateStatistics(null);
+      
+      const { apiClient } = await import('./utils/api.js');
+      
+      // Fetch only candle data for the chart
+      const result = await apiClient.runBacktest({
+        symbol,
+        interval,
+        ...config.strategyParams
+      });
+      
+      // Update with new data
+      backtestStore.updateCandles(result.candles || []);
+      
+    } catch (err) {
+      console.error('Error updating chart data:', err);
+      error = `Failed to load data for ${symbol} ${interval}`;
+    } finally {
+      loading = false;
+    }
+  }
+
   // Handle panel toggles
   function toggleStrategyPanel() {
     strategyPanelCollapsed = !strategyPanelCollapsed;
@@ -84,6 +124,8 @@
             bind:selectedInterval={config.selectedInterval}
             {loading}
             on:backtest={handleBacktest}
+            on:symbolChanged={handleSymbolChanged}
+            on:intervalChanged={handleIntervalChanged}
           />
         {/if}
       </div>

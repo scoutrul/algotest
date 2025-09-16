@@ -48,10 +48,78 @@
   // Event dispatcher
   const dispatch = createEventDispatcher();
 
-  // Reactive statements
+  // Track symbol/interval changes to reset viewport
+  let lastSymbol = symbol;
+  let lastInterval = interval;
+  
+  // Function to completely reinitialize chart (like tab switching does)
+  function reinitializeChart() {
+    console.log('🔄 Completely reinitializing chart for symbol change');
+    
+    try {
+      // Destroy current chart completely
+      if (chart) {
+        chart.remove();
+        chart = null;
+      }
+      
+      // Reset all state variables
+      candlestickSeries = null;
+      leftPlaceholders = [];
+      backfillCursor = null;
+      reachedHistoryStart = false;
+      
+      // Force a small delay then reinitialize
+      setTimeout(() => {
+        if (chartContainer) {
+          initializeChart();
+          // After reinit, update with current data if available
+          if (candles.length > 0) {
+            setTimeout(() => {
+              updateChart({ preserveViewport: false });
+            }, 100);
+          }
+        }
+      }, 50);
+      
+    } catch (error) {
+      console.warn('Failed to reinitialize chart:', error);
+    }
+  }
+
+  // Legacy function kept for compatibility
+  function forcePriceScaleReset() {
+    // Just call the full reinitialize now
+    reinitializeChart();
+  }
+  
+  // Reactive statements for symbol/interval changes
+  $: if (chart) {
+    // Check if symbol or interval changed - completely reinitialize if so
+    const symbolChanged = symbol !== lastSymbol;
+    const intervalChanged = interval !== lastInterval;
+    
+    if (symbolChanged || intervalChanged) {
+      lastSymbol = symbol;
+      lastInterval = interval;
+      console.log(`Symbol/interval changed: ${symbol} ${interval}, completely reinitializing chart`);
+      
+      // Completely reinitialize chart (like tab switching does)
+      reinitializeChart();
+    }
+  }
+  
+  // Separate reactive block for candle updates
   $: if (chart && candles.length > 0) {
-    console.log('Reactive updateChart triggered, candles:', candles.length, 'activeBackfillCount:', activeBackfillCount);
-    updateChart({ preserveViewport: true });
+    console.log('Reactive updateChart triggered, candles:', candles.length, 'symbol:', symbol, 'activeBackfillCount:', activeBackfillCount);
+    
+    // If symbol/interval matches current, it's new data for current symbol
+    if (symbol === lastSymbol && interval === lastInterval) {
+      updateChart({ preserveViewport: true });
+    } else {
+      // This is new data for a different symbol - reset viewport
+      updateChart({ preserveViewport: false });
+    }
   }
 
   $: if (chart && trades.length > 0) {
@@ -133,6 +201,11 @@
       },
       rightPriceScale: {
         borderColor: '#cccccc',
+        autoScale: true,
+        scaleMargins: {
+          top: 0.1,
+          bottom: 0.1,
+        },
       },
       timeScale: {
         borderColor: '#cccccc',
@@ -264,7 +337,58 @@
     candlestickSeries.setData(chartData);
 
     if (!preserveViewport && realData.length) {
+      // Reset both time and price scales when viewport needs reset
       chart.timeScale().fitContent();
+      
+      // Force price scale to fit the new data range
+      try {
+        // Get price scale and reset its auto-scaling
+        const priceScale = chart.priceScale('right');
+        if (priceScale) {
+          // Force recalculation of price range
+          priceScale.applyOptions({
+            autoScale: true,
+            scaleMargins: {
+              top: 0.1,    // 10% margin at top
+              bottom: 0.1  // 10% margin at bottom
+            }
+          });
+        }
+        
+        // Additional method: use series price range if available
+        if (candlestickSeries && realData.length > 0) {
+          // Calculate min/max from actual data
+          const prices = realData.flatMap(d => [d.high, d.low]);
+          const minPrice = Math.min(...prices);
+          const maxPrice = Math.max(...prices);
+          
+          console.log(`Price range for ${symbol}: ${minPrice.toFixed(2)} - ${maxPrice.toFixed(2)}`);
+          
+          // Force visible range to match data range with margins
+          const margin = (maxPrice - minPrice) * 0.1; // 10% margin
+          try {
+            // Force price scale to auto-fit the new range
+            const priceScale = chart.priceScale('right');
+            if (priceScale) {
+              // Reset price scale options to force recalculation
+              priceScale.applyOptions({
+                autoScale: true,
+                scaleMargins: {
+                  top: 0.1,
+                  bottom: 0.1,
+                },
+              });
+            }
+            // Force time scale to fit content which triggers price scale recalculation
+            chart.timeScale().fitContent();
+          } catch (e) {
+            console.log('Using fallback price scale method:', e);
+            chart.timeScale().fitContent();
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to reset price scale:', error);
+      }
     }
   }
 
@@ -404,6 +528,17 @@
     console.log('Setting up backfill for', symbol, interval);
 
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      // Guard against null/undefined range or missing properties
+      if (!range || range.from == null || range.to == null || reachedHistoryStart) {
+        console.log('Viewport change ignored:', { 
+          noRange: !range, 
+          invalidFrom: range?.from == null,
+          invalidTo: range?.to == null,
+          reachedHistoryStart 
+        });
+        return;
+      }
+
       console.log('📊 Viewport changed:', {
         from: range.from,
         to: range.to,
@@ -411,11 +546,6 @@
         initialLoadComplete,
         triggerActivated: false
       });
-
-      if (!range || reachedHistoryStart) {
-        console.log('Viewport change ignored:', { noRange: !range, reachedHistoryStart });
-        return;
-      }
 
       // Debug logging
       console.log('Backfill check:', {

@@ -23,6 +23,7 @@
   // Store subscriptions
   $: backtestData = $backtestStore;
   $: config = $configStore;
+  $: liquidityState = $liquidityStore;
 
   onMount(async () => {
     try {
@@ -36,13 +37,18 @@
       // 💧 Initialize liquidity feature
       try {
         await liquidityStore.loadStats();
-        // Enable liquidity feature by default
-        liquidityStore.enable();
-        console.log('✅ Liquidity feature initialized successfully');
+        // Liquidity state is already loaded from localStorage in the store
+        console.log('✅ Liquidity feature initialized successfully with persisted state');
+        console.log(`💾 Loaded persisted state: symbol=${config.selectedSymbol}, interval=${config.selectedInterval}, liquidity visible=${liquidityState.visible}`);
       } catch (liquidityErr) {
         console.warn('⚠️ Failed to initialize liquidity feature:', liquidityErr);
         // Don't block app startup if liquidity fails
       }
+
+      // 📊 Load initial chart data with persisted symbol/interval
+      console.log('Loading initial chart data with persisted settings...');
+      await updateChartData(config.selectedSymbol, config.selectedInterval);
+      
     } catch (err) {
       console.error('Error loading configuration:', err);
       error = err.message;
@@ -86,11 +92,6 @@
     error = null;
     
     try {
-      // First clear old data immediately
-      backtestStore.updateCandles([]);
-      backtestStore.updateTrades([]);
-      backtestStore.updateStatistics(null);
-      
       const { apiClient } = await import('./utils/api.js');
       
       // Fetch only candle data for the chart
@@ -100,13 +101,16 @@
         ...config.strategyParams
       });
       
-      // Update with new data
-      backtestStore.updateCandles(result.candles || []);
+      const candles = Array.isArray(result?.candles) ? result.candles : [];
+      backtestStore.updateCandles(candles);
       
+      // Stop loading immediately after successful update
+      loading = false;
     } catch (err) {
       console.error('Error updating chart data:', err);
       error = `Failed to load data for ${symbol} ${interval}`;
     } finally {
+      // Safety: ensure we always clear loading
       loading = false;
     }
   }

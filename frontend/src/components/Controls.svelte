@@ -133,29 +133,17 @@
       <button 
         class="btn {$liquidityState.visible ? 'btn-liquidity-active' : 'btn-liquidity'}"
         on:click={handleLiquidityToggle}
-        disabled={$liquidityState.loading}
         title={$liquidityState.visible ? 'Hide liquidity overlay' : 'Show liquidity overlay'}
       >
-        {#if $liquidityState.loading}
-          <span class="loading-spinner"></span>
-          Loading...
-        {:else if $liquidityState.visible}
-          <span class="icon">💧</span>
-          Hide Liquidity
-        {:else}
-          <span class="icon">💧</span>
-          Show Liquidity
-        {/if}
+        <span class="icon">💧</span>
+        {$liquidityState.visible ? 'Hide Liquidity' : 'Show Liquidity'}
       </button>
       
-      <!-- Status indicator -->
+      <!-- Simple status indicator - only when visible -->
       {#if $liquidityState.visible}
         <div class="liquidity-status">
-          {#if $liquidityState.hasData}
-            <span class="status-indicator status-active" title="Liquidity data loaded">●</span>
-          {:else}
-            <span class="status-indicator status-loading" title="Loading liquidity data">●</span>
-          {/if}
+          <span class="status-indicator {$liquidityState.hasData ? 'status-active' : 'status-loading'}" 
+                title={$liquidityState.hasData ? 'Liquidity data active' : 'Loading liquidity data'}>●</span>
           <span class="status-text">
             {$liquidityState.hasData ? 'Active' : 'Loading...'}
           </span>

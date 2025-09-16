@@ -1,10 +1,14 @@
 // Configuration state management store
 import { writable } from 'svelte/store';
+import { appStorage } from '../utils/storage.js';
 
-// Initial state
+// Load persisted state on initialization
+const persistedState = appStorage.loadPersistedState();
+
+// Initial state with persisted values
 const initialState = {
-  selectedSymbol: 'BTC/USDT',
-  selectedInterval: '15m',
+  selectedSymbol: persistedState.selectedSymbol,
+  selectedInterval: persistedState.selectedInterval,
   strategyParams: {
     lookback_period: 20,
     volume_threshold: 1.5,
@@ -109,11 +113,13 @@ function createConfigStore() {
     // Update selected symbol
     setSelectedSymbol: (symbol) => {
       update(state => ({ ...state, selectedSymbol: symbol }));
+      appStorage.setSelectedSymbol(symbol);
     },
     
     // Update selected interval
     setSelectedInterval: (interval) => {
       update(state => ({ ...state, selectedInterval: interval }));
+      appStorage.setSelectedInterval(interval);
     },
     
     // Update strategy parameters

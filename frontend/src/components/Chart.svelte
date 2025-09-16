@@ -4,6 +4,7 @@
   import { chartUtils } from '../utils/chart.js';
   import { apiClient } from '../utils/api.js';
   import { liquidityStore, liquidityVisible, currentOrderBook } from '../stores/liquidity.js';
+  import { liveCandle } from '../stores/liveCandle.js';
   let createChartFn = null;
 
   // Props
@@ -271,6 +272,15 @@
   $: if (chart && candles.length > 0) {
     console.log('Reactive updateChart triggered, candles:', candles.length, 'symbol:', symbol, 'activeBackfillCount:', activeBackfillCount);
     
+    // Mark initial load completed once real candles are in
+    if (!initialLoadComplete) initialLoadComplete = true;
+    
+    // Set backfill cursor if not set yet
+    if (!backfillCursor) {
+      backfillCursor = candles[0].timestamp;
+      console.log('Setting backfill cursor from reactive data:', backfillCursor);
+    }
+    
     // If symbol/interval matches current, it's new data for current symbol
     if (symbol === lastSymbol && interval === lastInterval) {
       updateChart({ preserveViewport: true });
@@ -292,44 +302,71 @@
       initializeChart();
       setupResizeObserver();
       setupBackfill();
-      // initial load if no candles yet
-      console.log('Chart init: checking candles', {
-        candlesExists: !!candles,
-        candlesLength: candles?.length || 0
-      });
 
-      if (!candles || candles.length === 0) {
-        const nowBatch = await apiClient.getCandles({ symbol, interval, limit: 1000 });
-        if (nowBatch && nowBatch.length) {
-          candles = nowBatch;
-          backfillCursor = candles[0].timestamp;
-          ensureLeftBuffer(500);
-          updateChart({ preserveViewport: false });
-          initialLoadComplete = true;
-          console.log('Initial load complete, starting automatic backfill');
+      // initial load handled by App.svelte via backtest
+      console.log('Chart init: waiting for App to provide candles');
+      initialLoadComplete = true;
 
-          // Start automatic backfill with 1-2 historical batches
-          console.log('Setting timeout for automatic backfill...');
-          setTimeout(() => {
-            console.log('Timeout triggered, calling performAutomaticBackfill...');
-            performAutomaticBackfill(2);
-          }, 100);
-        }
-      } else {
-        initialLoadComplete = true;
-        console.log('Data already exists, setting timeout for automatic backfill...');
-        // If data already exists, still do automatic backfill
-        setTimeout(() => {
-          console.log('Timeout triggered for existing data, calling performAutomaticBackfill...');
-          performAutomaticBackfill(2);
-        }, 100);
-      }
+      // Connect live kline stream
+      try {
+        if (liveConnected) liveCandle.disconnect();
+        liveCandle.connect(symbol, interval, (k) => {
+          try {
+            const barSec = Math.floor(k.timestamp / 1000);
+            const last = candles && candles[candles.length - 1];
+            if (last && Math.floor(new Date(last.timestamp).getTime() / 1000) === barSec) {
+              last.open = k.open;
+              last.high = Math.max(last.high, k.high);
+              last.low = Math.min(last.low, k.low);
+              last.close = k.close;
+            } else if (k.isClosed) {
+              candles = [...(candles || []), {
+                timestamp: k.timestamp,
+                open: k.open, high: k.high, low: k.low, close: k.close,
+                volume: k.volume,
+              }];
+            }
+            updateChart({ preserveViewport: true });
+          } catch (_) {}
+        });
+        liveConnected = true;
+      } catch (_) {}
     } catch (e) {
       console.error('Chart init failed:', e);
     }
   });
 
-  onDestroy(() => {
+  // Reconnect live stream on symbol/interval change
+  $: if (chart && (symbol !== lastSymbol || interval !== lastInterval)) {
+    (async () => {
+      try {
+        if (liveConnected) liveCandle.disconnect();
+        liveCandle.connect(symbol, interval, (k) => {
+          try {
+            const barSec = Math.floor(k.timestamp / 1000);
+            const last = candles && candles[candles.length - 1];
+            if (last && Math.floor(new Date(last.timestamp).getTime() / 1000) === barSec) {
+              last.open = k.open;
+              last.high = Math.max(last.high, k.high);
+              last.low = Math.min(last.low, k.low);
+              last.close = k.close;
+            } else if (k.isClosed) {
+              candles = [...(candles || []), {
+                timestamp: k.timestamp,
+                open: k.open, high: k.high, low: k.low, close: k.close,
+                volume: k.volume,
+              }];
+            }
+            updateChart({ preserveViewport: true });
+          } catch (_) {}
+        });
+        liveConnected = true;
+      } catch (_) {}
+    })();
+  }
+
+  onDestroy(async () => {
+    try { const { liveCandle } = await import('../stores/liveCandle.js'); liveCandle.disconnect(); } catch (_) {}
     if (resizeObserver) {
       resizeObserver.disconnect();
     }
@@ -442,14 +479,8 @@
     for (let i = 1; i <= count; i++) {
       const time = oldest - i * sec;
       if (!existingTimes.has(time)) {
-        // Create flat candles with the same price for all OHLC values
-        needed.push({
-          time,
-          open: flatPrice,
-          high: flatPrice,
-          low: flatPrice,
-          close: flatPrice
-        });
+        // Use whitespace bars (time only), they don't affect autoscale
+        needed.push({ time });
       }
     }
 
@@ -466,7 +497,7 @@
   function updateChart({ preserveViewport = false } = {}) {
     if (!candlestickSeries) return;
 
-    // Convert candles to chart format
+    // Convert candles to chart format (real data only)
     const realData = (candles || []).map(candle => ({
       time: Math.floor(new Date(candle.timestamp).getTime() / 1000),
       open: candle.open,
@@ -478,28 +509,11 @@
     // Update backfill cursor to oldest candle
     backfillCursor = candles && candles.length ? candles[0].timestamp : backfillCursor;
 
-    // Create loading placeholders with special styling during backfill
-    const loadingPlaceholders = leftPlaceholders.map(placeholder => ({
-      ...placeholder,
-      // Add loading indicator styling during backfill
-      ...(isLoadingMore ? {
-        loading: true
-      } : {})
-    }));
-
-    // Compose placeholders + real data, sort and deduplicate
-    const combinedData = [...loadingPlaceholders, ...realData];
-
-    // Sort by time ascending
-    combinedData.sort((a, b) => a.time - b.time);
-
-    // Remove duplicates by time (keep the one with more data - real data preferred)
-    const seenTimes = new Set();
-    const chartData = combinedData.filter(item => {
-      if (seenTimes.has(item.time)) {
-        return false;
-      }
-      seenTimes.add(item.time);
+    // Strictly increasing time with only real candles
+    const seen = new Set();
+    const chartData = realData.filter(d => {
+      if (seen.has(d.time)) return false;
+      seen.add(d.time);
       return true;
     });
 
@@ -662,24 +676,95 @@
 
           if (onlyNew.length) {
             console.log(`Automatic backfill: adding ${onlyNew.length} candles from batch ${i + 1}`);
+            
+            // Store current viewport before adding new candles
+            const currentRange = chart.timeScale().getVisibleLogicalRange();
+            
+            // Add new candles and sort, then find where they were inserted
+            const oldCandlesCount = (candles || []).length;
+            const oldCandles = [...(candles || [])];
             candles = [...onlyNew, ...(candles || [])].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
-            backfillCursor = candles[0].timestamp;
+            const newCandlesCount = candles.length;
+            const actuallyAdded = newCandlesCount - oldCandlesCount;
+            
+            // Find how many candles were added to the left of the current view
+            let addedToLeft = 0;
+            if (oldCandles.length > 0 && candles.length > 0) {
+              const firstOldTime = new Date(oldCandles[0].timestamp).getTime();
+              const firstNewTime = new Date(candles[0].timestamp).getTime();
+              
+              // If the first candle is older than the first old candle, we added to the left
+              if (firstNewTime < firstOldTime) {
+                addedToLeft = actuallyAdded;
+              } else {
+                // Check if we added to the right (which shouldn't happen in backfill)
+                const lastOldTime = new Date(oldCandles[oldCandles.length - 1].timestamp).getTime();
+                const lastNewTime = new Date(candles[candles.length - 1].timestamp).getTime();
+                if (lastNewTime > lastOldTime) {
+                  console.warn('New candles added to the right instead of left - this is not historical backfill');
+                  addedToLeft = 0;
+                } else {
+                  // Candles were added in the middle, which is also wrong for backfill
+                  console.warn('New candles added in the middle instead of left - this is not historical backfill');
+                  addedToLeft = 0;
+                }
+              }
+            }
+            
+            console.log(`Backfill: added ${actuallyAdded} candles (expected ${onlyNew.length}), total: ${oldCandlesCount} -> ${newCandlesCount}`);
+            console.log(`Added to left: ${addedToLeft} candles`);
+            
+            // Verify that new candles are at the beginning
+            if (candles.length > 0) {
+              const oldestCandle = candles[0];
+              const newestCandle = candles[candles.length - 1];
+              console.log(`Candles range: ${oldestCandle.timestamp} (oldest) to ${newestCandle.timestamp} (newest)`);
+              
+              // Show first few and last few candles for debugging
+              console.log(`First 3 candles:`, candles.slice(0, 3).map(c => c.timestamp));
+              console.log(`Last 3 candles:`, candles.slice(-3).map(c => c.timestamp));
+            }
+            
+            const prevCursor = backfillCursor;
+            
+            // Only update backfillCursor if we actually added candles to the left
+            if (addedToLeft > 0) {
+              backfillCursor = candles[0].timestamp;
+              console.log(`Updated backfillCursor to: ${backfillCursor}`);
+            } else {
+              console.warn('Not updating backfillCursor - no candles added to the left');
+            }
+            
+            // Reset request guard if cursor changed
+            if (prevCursor !== backfillCursor) {
+              lastRequestedCursor = null;
+            }
             ensureLeftBuffer(500);
+            
+            // Update chart data first
             updateChart({ preserveViewport: true });
 
-            // After prepending, keep the viewport anchored by shifting logical range to the right
-            if (prevRangeBeforeBackfill && onlyNew.length && chart) {
+            // Shift viewport to the right by the number of candles added to the left
+            if (currentRange && addedToLeft > 0 && chart) {
               try {
-                chart.timeScale().setVisibleLogicalRange({
-                  from: prevRangeBeforeBackfill.from + onlyNew.length,
-                  to: prevRangeBeforeBackfill.to + onlyNew.length,
-                });
-              } catch (_) {}
+                const newRange = {
+                  from: currentRange.from + addedToLeft,
+                  to: currentRange.to + addedToLeft,
+                };
+                console.log(`Shifting viewport: ${currentRange.from}-${currentRange.to} -> ${newRange.from}-${newRange.to} (added ${addedToLeft} candles to left)`);
+                chart.timeScale().setVisibleLogicalRange(newRange);
+              } catch (e) {
+                console.warn('Failed to shift viewport:', e);
+              }
+            } else if (addedToLeft === 0 && actuallyAdded > 0) {
+              console.warn('Not shifting viewport - no candles added to the left, but viewport shift would be needed');
             }
           } else {
             // Nothing new, move cursor one interval back
             const ts = new Date(cursor).getTime() - (intervalToSec[interval] || 900) * 1000;
             backfillCursor = new Date(ts).toISOString();
+            // Reset request guard to allow retry with shifted cursor
+            lastRequestedCursor = null;
           }
         } else {
           reachedHistoryStart = true;
@@ -736,201 +821,53 @@
         isLoading: isLoadingMore
       });
 
-      // Improved trigger: only when panning left and near the left edge of loaded data
+      // Improved trigger: operate purely in logical indexes (bars)
       const windowWidth = range.to - range.from;
-      const visibleStartTime = Math.floor(range.from);
-      const oldestCandleTime = candles?.length ? Math.floor(new Date(candles[0].timestamp).getTime() / 1000) : null;
-      const latestCandleTime = candles?.length ? Math.floor(new Date(candles[candles.length - 1].timestamp).getTime() / 1000) : null;
+      const visibleStartIdx = range.from;
+      const totalBars = (candles?.length || 0) + (leftPlaceholders?.length || 0);
+      const oldestBarIdx = (leftPlaceholders?.length || 0); // index of first REAL candle
+      const latestBarIdx = totalBars > 0 ? totalBars - 1 : null;
 
       // Only trigger if user moved viewport further left than before (avoid triggering on zoom-in place)
       const movedLeft = lastLogicalRange ? range.from < lastLogicalRange.from : false;
+      
+      // Add minimum movement threshold to prevent micro-movements from triggering backfill
+      const significantMovement = lastLogicalRange ? Math.abs(range.from - lastLogicalRange.from) > (windowWidth * 0.05) : true;
 
-      // Consider we're "near left edge" if start is within 50% of current window width from the oldest loaded candle
-      const nearLeftEdge = oldestCandleTime ? (visibleStartTime - oldestCandleTime) < (windowWidth * 0.5) : false;
+      // "Near left edge" if start is within 50% of current window width from the oldest loaded bar
+      const nearLeftEdge = (visibleStartIdx - oldestBarIdx) < (windowWidth * 0.5);
+      const veryCloseLeft = (visibleStartIdx - oldestBarIdx) < (windowWidth * 0.1);
 
       // Avoid backfill when we're near the latest bars (zooming at the right edge)
-      const nearRightEdge = latestCandleTime ? (latestCandleTime - Math.floor(range.to)) < (windowWidth * 0.2) : false;
+      const nearRightEdge = false; // do not block by right edge
+      
+      // Cooldowns
+      const currentTime = Date.now();
+      const timeSinceLastBackfill = currentTime - lastTriggerTime;
+      const backfillCooldownPassed = timeSinceLastBackfill > 750; // 0.75s min gap
 
-      // Final decision
-      const shouldTriggerBackfill = movedLeft && nearLeftEdge && !nearRightEdge;
+      // Save last range for next comparison
+      lastLogicalRange = range;
+
+      // Final decision (allow trigger if user is very close to left edge even without clear movedLeft)
+      const shouldTriggerBackfill = initialLoadComplete && nearLeftEdge && (movedLeft || veryCloseLeft || significantMovement) && backfillCooldownPassed;
 
       console.log('Trigger check:', {
         rangeFrom: range.from,
         movedLeft,
+        significantMovement,
         nearLeftEdge,
-        nearRightEdge,
-        visibleStartTime,
-        oldestCandleTime,
-        latestCandleTime,
-        placeholdersCount: leftPlaceholders.length
+        nearRightEdge
       });
-
-      // Save last range for next comparison
-      lastLogicalRange = range;
 
       if (!shouldTriggerBackfill) {
         console.log('❌ Backfill not triggered - conditions not met');
         return;
       }
 
-      // Prevent too many concurrent backfill requests
-      if (activeBackfillCount >= MAX_CONCURRENT_BACKFILLS) {
-        console.log('❌ Backfill limit reached, skipping request. Active:', activeBackfillCount, 'Max:', MAX_CONCURRENT_BACKFILLS);
-        return;
-      }
-
-      // Prevent overlapping with existing requests
-      if (isLoadingMore || pendingBackfill) {
-        console.log('❌ Backfill already in progress, skipping request');
-        return;
-      }
-
-      console.log('✅ All checks passed, proceeding with backfill request');
-
-      const now = Date.now();
-      const timeSinceLastTrigger = now - lastTriggerTime;
-
-      console.log('🎯 TRIGGER ACTIVATED! Starting backfill request...', {
-        timeSinceLastTrigger,
-        lastTriggerTime: new Date(lastTriggerTime).toLocaleTimeString()
-      });
-
-      // Prevent triggers too close together (minimum 500ms between triggers)
-      if (timeSinceLastTrigger < 500) {
-        console.log('⏳ Trigger too soon, skipping...');
-        return;
-      }
-
-      lastTriggerTime = now;
-
-      // Capture current visible logical range to preserve viewport after prepend
-      try { prevRangeBeforeBackfill = chart.timeScale().getVisibleLogicalRange(); } catch (_) { prevRangeBeforeBackfill = null; }
-
-      // Execute backfill immediately
-      console.log('🚀 EXECUTING BACKFILL IMMEDIATELY...');
-      
-      (async () => {
-        console.log('⏰ Debounce timer fired, executing backfill...');
-        console.log('Backfill conditions:', {
-          isLoadingMore,
-          pendingBackfill: !!pendingBackfill,
-          activeBackfillCount,
-          candlesLength: candles?.length || 0,
-          MAX_CONCURRENT_BACKFILLS
-        });
-
-        try {
-          if (isLoadingMore || pendingBackfill) {
-            console.log('❌ Skipping backfill due to active request');
-            console.log('Resetting debounce timer for next attempt...');
-            // Reset timer to try again later
-            debounceTimer = setTimeout(() => {
-              console.log('🔄 Retrying backfill after skip...');
-              // Recursive call to retry
-              if (!isLoadingMore && !pendingBackfill) {
-                performAutomaticBackfill(1);
-              }
-            }, 1000);
-            return;
-          }
-          console.log('✅ Backfill conditions passed, proceeding...');
-
-          const cursor = backfillCursor || (candles.length ? candles[0].timestamp : null);
-          console.log('Cursor check:', {
-            cursor,
-            backfillCursor,
-            oldestCandleTimestamp: candles?.[0]?.timestamp,
-            lastRequestedCursor
-          });
-
-          if (!cursor) {
-            console.log('No cursor available, skipping backfill');
-            return;
-          }
-
-          // don't duplicate request for same cursor
-          if (lastRequestedCursor === cursor) {
-            console.log('Duplicate cursor detected, skipping backfill');
-            return;
-          }
-
-          console.log('🚀 About to start backfill request...');
-          isLoadingMore = true;
-          lastRequestedCursor = cursor;
-          activeBackfillCount++;
-          console.log(`✅ Starting backfill request ${activeBackfillCount}/${MAX_CONCURRENT_BACKFILLS} for cursor:`, cursor);
-
-          // before requesting, ensure we already have a left buffer so viewport doesn't move
-          ensureLeftBuffer(500);
-          updateChart({ preserveViewport: true });
-
-          // fetch older data using end_time (get data BEFORE cursor)
-          console.log('🚀 Making backfill API request:', {
-            symbol,
-            interval,
-            end_time: cursor,
-            limit: 1000
-          });
-
-          pendingBackfill = apiClient.getCandles({
-            symbol,
-            interval,
-            end_time: cursor,
-            limit: 1000
-          });
-
-          console.log('📡 API call initiated, waiting for response...');
-
-          const older = await pendingBackfill;
-          pendingBackfill = null;
-
-          console.log('📥 API response received:', {
-            received: older?.length || 0,
-            cursor: cursor,
-            oldestCurrent: candles?.[0]?.timestamp,
-            newestCurrent: candles?.[candles.length - 1]?.timestamp
-          });
-
-          if (older && older.length) {
-            // replace matching placeholders by time
-            const olderTimes = new Set(older.map(c => Math.floor(new Date(c.timestamp).getTime() / 1000)));
-            leftPlaceholders = leftPlaceholders.filter(p => !olderTimes.has(p.time));
-
-            // prepend new real candles (filter out duplicates)
-            const existing = new Set((candles || []).map(c => new Date(c.timestamp).getTime()));
-            const onlyNew = older.filter(c => !existing.has(new Date(c.timestamp).getTime()));
-
-            if (onlyNew.length) {
-              candles = [...onlyNew, ...(candles || [])].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
-              backfillCursor = candles[0].timestamp;
-              updateChart({ preserveViewport: true });
-
-              // After prepending, keep the viewport anchored by shifting logical range to the right
-              if (prevRangeBeforeBackfill && onlyNew.length && chart) {
-                try {
-                  chart.timeScale().setVisibleLogicalRange({
-                    from: prevRangeBeforeBackfill.from + onlyNew.length,
-                    to: prevRangeBeforeBackfill.to + onlyNew.length,
-                  });
-                } catch (_) {}
-              }
-            } else {
-              // nothing new, move cursor one interval back for next attempt
-              const ts = new Date(cursor).getTime() - (intervalToSec[interval] || 900) * 1000;
-              backfillCursor = new Date(ts).toISOString();
-            }
-          } else {
-            reachedHistoryStart = true;
-          }
-        } catch (e) {
-          console.warn('Backfill error:', e);
-        } finally {
-          console.log('🏁 Backfill request finishing, resetting flags...');
-          isLoadingMore = false;
-          activeBackfillCount = Math.max(0, activeBackfillCount - 1);
-          console.log(`✅ Backfill request completed. Active requests: ${activeBackfillCount}/${MAX_CONCURRENT_BACKFILLS}`);
-        }
-      })();
+      lastTriggerTime = currentTime;
+      prevRangeBeforeBackfill = chart.timeScale().getVisibleLogicalRange();
+      performAutomaticBackfill(1);
     });
   }
 
@@ -1408,17 +1345,7 @@
     100% { transform: rotate(360deg); }
   }
 
-  /* Placeholder candles styling */
-  .placeholder-candle {
-    opacity: 0.6;
-    border-style: dashed !important;
-    border-width: 1px !important;
-  }
 
-  .placeholder-candle.loading {
-    opacity: 0.4;
-    animation: placeholder-pulse 2s ease-in-out infinite;
-  }
 
   @keyframes placeholder-pulse {
     0%, 100% { opacity: 0.4; }
@@ -1440,13 +1367,6 @@
     .chart-legend {
       justify-content: center;
     }
-
-    .backfill-indicator {
-      top: 5px;
-      right: 5px;
-      padding: 0.25rem 0.5rem;
-    }
-
 
   }
 </style>

@@ -1,12 +1,19 @@
 // Liquidity data management store
 import { writable, derived } from 'svelte/store';
 import { configStore } from './config.js';
+import { appStorage } from '../utils/storage.js';
+
+// Load persisted liquidity state
+const persistedLiquidityState = {
+  enabled: appStorage.getLiquidityEnabled(),
+  visible: appStorage.getLiquidityVisible()
+};
 
 // Initial state
 const initialState = {
   // Feature control
-  enabled: true,
-  visible: true,
+  enabled: persistedLiquidityState.enabled,
+  visible: persistedLiquidityState.visible,
   loading: false,
   error: null,
   
@@ -56,6 +63,7 @@ function createLiquidityStore() {
     // Feature control
     enable: () => {
       update(state => ({ ...state, enabled: true }));
+      appStorage.setLiquidityEnabled(true);
     },
     
     disable: () => {
@@ -67,19 +75,27 @@ function createLiquidityStore() {
         historicalData: [],
         chartData: []
       }));
+      appStorage.setLiquidityEnabled(false);
+      appStorage.setLiquidityVisible(false);
     },
     
     // Visibility control
     show: () => {
       update(state => ({ ...state, visible: true }));
+      appStorage.setLiquidityVisible(true);
     },
     
     hide: () => {
       update(state => ({ ...state, visible: false }));
+      appStorage.setLiquidityVisible(false);
     },
     
     toggle: () => {
-      update(state => ({ ...state, visible: !state.visible }));
+      update(state => {
+        const newVisible = !state.visible;
+        appStorage.setLiquidityVisible(newVisible);
+        return { ...state, visible: newVisible };
+      });
     },
     
     // Data loading

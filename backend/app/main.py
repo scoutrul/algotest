@@ -92,6 +92,37 @@ async def startup_event():
         logger.error(f"Failed to initialize database: {e}")
         raise
 
+    # Auto-update market data on startup
+    try:
+        from .api.data import sync_data_background
+        import asyncio
+        
+        # Priority symbols and intervals for auto-update
+        priority_updates = [
+            ("BTC/USDT", "15m"),
+            ("ETH/USDT", "15m"),
+            ("BTC/USDT", "1h"),
+            ("ETH/USDT", "1h"),
+        ]
+        
+        logger.info("Starting automatic market data update...")
+        
+        # Run updates in background without blocking startup
+        async def auto_update_data():
+            for symbol, interval in priority_updates:
+                try:
+                    await sync_data_background(symbol, interval, limit=2000)
+                    logger.info(f"Auto-updated {symbol} {interval}")
+                except Exception as e:
+                    logger.warning(f"Auto-update failed for {symbol} {interval}: {e}")
+        
+        # Schedule the update task to run after startup completes
+        asyncio.create_task(auto_update_data())
+        logger.info("Automatic data update scheduled")
+        
+    except Exception as e:
+        logger.warning(f"Failed to schedule automatic data update: {e}")
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Application shutdown event."""

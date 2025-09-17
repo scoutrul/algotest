@@ -1360,7 +1360,7 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    max-height: 500px;
+    max-height: max-content;
     background: white;
   }
 

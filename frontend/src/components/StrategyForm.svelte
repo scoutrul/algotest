@@ -27,9 +27,6 @@
     configStore.resetToDefaults();
   }
 
-  function toggleCollapsed() {
-    collapsed = !collapsed;
-  }
 
   function updateParam(key, value) {
     params = { ...params, [key]: value };
@@ -51,13 +48,7 @@
 </script>
 
 <div class="strategy-form">
-  <!-- Form header -->
-  <div class="form-header">
-    <h3>Strategy Parameters</h3>
-    <button class="btn btn-secondary" on:click={toggleCollapsed}>
-      {collapsed ? 'Expand' : 'Collapse'}
-    </button>
-  </div>
+  <!-- Form header removed - now handled by App.svelte -->
 
   {#if !collapsed}
     <form on:submit={handleSubmit} class="strategy-form-content">

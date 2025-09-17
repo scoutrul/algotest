@@ -12,9 +12,6 @@
   $: recentTrades = trades.slice(-10).reverse();
   $: hasData = statistics && trades.length > 0;
 
-  function toggleCollapsed() {
-    collapsed = !collapsed;
-  }
 
   function getStatValue(stat, formatter = (v) => v) {
     if (!statistics || statistics[stat] === undefined) return 'N/A';
@@ -28,13 +25,7 @@
 </script>
 
 <div class="statistics-panel">
-  <!-- Statistics header -->
-  <div class="stats-header">
-    <h3>Backtest Results</h3>
-    <button class="btn btn-secondary" on:click={toggleCollapsed}>
-      {collapsed ? 'Expand' : 'Collapse'}
-    </button>
-  </div>
+  <!-- Statistics header removed - now handled by App.svelte -->
 
   {#if !collapsed}
     {#if loading}

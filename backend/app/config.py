@@ -59,7 +59,7 @@ class Settings:
     
     # Supported Intervals
     SUPPORTED_INTERVALS: List[str] = [
-        "1m", "15m", "1h", "4h", "12h", "1d", "1w", "1M"
+        "1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "1w", "1M"
     ]
     
     # Data Limits

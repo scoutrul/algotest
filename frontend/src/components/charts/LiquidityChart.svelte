@@ -3,6 +3,7 @@
   import { createChart, ColorType } from 'lightweight-charts';
   import { liquidityStore } from '../../stores/liquidity.js';
   import { apiClient } from '../../utils/api.js';
+  import { configStore } from '../../stores/config.js';
 
   const dispatch = createEventDispatcher();
 
@@ -26,6 +27,9 @@
   let loading = false;
   let error = null;
 
+  // Timeframe from global config
+  let selectedInterval = '1m';
+
   // Subscribe to liquidity store
   const unsubscribe = liquidityStore.subscribe(state => {
     // Widget should render whenever feature is enabled, independent of overlay toggle
@@ -37,6 +41,17 @@
     // Update chart when data changes
     if (isInitialized && isVisible && currentOrderBook) {
       safeUpdateLiquidityVisualization();
+    }
+  });
+
+  // Subscribe to global config for timeframe changes
+  const unsubscribeConfig = configStore.subscribe(state => {
+    const newInterval = state.selectedInterval || '1m';
+    const intervalChanged = newInterval !== selectedInterval;
+    selectedInterval = newInterval;
+    if (intervalChanged && isInitialized && isVisible && !isDisposed) {
+      // Reload with new effective range
+      loadCurrentOrderBook();
     }
   });
 
@@ -53,6 +68,28 @@
       } catch (_) {}
     }
   }
+
+  // Map timeframe to multiplier for how many levels to fetch/display
+  function getLevelsMultiplier(interval) {
+    const map = {
+      '1m': 1.0,
+      '3m': 1.5,
+      '5m': 2.0,
+      '15m': 4.0,
+      '30m': 6.0,
+      '1h': 8.0,
+      '2h': 10.0,
+      '4h': 12.0,
+      '6h': 14.0,
+      '8h': 16.0,
+      '12h': 18.0,
+      '1d': 20.0
+    };
+    return map[interval] || 1.0;
+  }
+
+  // Effective levels count based on timeframe
+  $: effectiveMaxLevels = Math.max(1, Math.min(200, Math.round(maxLevels * getLevelsMultiplier(selectedInterval))));
 
   onMount(() => {
     if (!chartContainer) return;
@@ -114,6 +151,7 @@
 
   onDestroy(() => {
     try { unsubscribe && unsubscribe(); } catch (_) {}
+    try { unsubscribeConfig && unsubscribeConfig(); } catch (_) {}
     try { chart?.remove(); } catch (_) {}
     isDisposed = true;
     chart = null;
@@ -128,7 +166,7 @@
       error = null;
       
       // Use the store's built-in loadCurrentOrderBook method
-      const orderBook = await liquidityStore.loadCurrentOrderBook(symbol, maxLevels * 2);
+      const orderBook = await liquidityStore.loadCurrentOrderBook(symbol, Math.min(100, effectiveMaxLevels * 2));
       
       if (isInitialized && isVisible) {
         safeUpdateLiquidityVisualization();
@@ -167,10 +205,10 @@
 
     const bidLevels = currentOrderBook?.bid_levels
       ?.filter(level => level.volume >= minVolume)
-      ?.slice(0, maxLevels) || [];
+      ?.slice(0, effectiveMaxLevels) || [];
     const askLevels = currentOrderBook?.ask_levels
       ?.filter(level => level.volume >= minVolume)
-      ?.slice(0, maxLevels) || [];
+      ?.slice(0, effectiveMaxLevels) || [];
 
     const histogramData = [];
     if (bidLevels.length > 0) {

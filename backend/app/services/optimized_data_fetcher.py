@@ -101,7 +101,7 @@ class OptimizedDataFetcher:
     
     def _validate_interval(self, interval: str):
         """Validate time interval."""
-        valid_intervals = ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d']
+        valid_intervals = ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '1w', '1M']
         if interval not in valid_intervals:
             raise ValueError(f"Invalid interval: {interval}. Must be one of: {valid_intervals}")
     
@@ -114,7 +114,8 @@ class OptimizedDataFetcher:
         interval_map = {
             '1m': 1, '5m': 5, '15m': 15, '30m': 30,
             '1h': 60, '2h': 120, '4h': 240, '6h': 360,
-            '8h': 480, '12h': 720, '1d': 1440
+            '8h': 480, '12h': 720, '1d': 1440,
+            '1w': 10080, '1M': 43200  # 1 week and 1 month
         }
         return interval_map.get(interval, 15)
     

@@ -81,7 +81,7 @@ class StrategyParams(BaseModel):
     @validator('interval')
     def validate_interval(cls, v):
         """Validate time interval format."""
-        valid_intervals = ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d']
+        valid_intervals = ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '1w', '1M']
         if v not in valid_intervals:
             raise ValueError(f'Interval must be one of: {valid_intervals}')
         return v

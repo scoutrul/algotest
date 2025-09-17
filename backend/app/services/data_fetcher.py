@@ -286,7 +286,9 @@ class DataFetcher:
             '6h': '6h',
             '8h': '8h',
             '12h': '12h',
-            '1d': '1d'
+            '1d': '1d',
+            '1w': '1w',
+            '1M': '1M'
         }
         return interval_map.get(interval, interval)
     
@@ -303,7 +305,9 @@ class DataFetcher:
             '6h': 360,
             '8h': 480,
             '12h': 720,
-            '1d': 1440
+            '1d': 1440,
+            '1w': 10080,  # 7 * 24 * 60 = 10080 minutes
+            '1M': 43200   # 30 * 24 * 60 = 43200 minutes (approximate)
         }
         return interval_minutes.get(interval, 60)
 

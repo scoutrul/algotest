@@ -5,6 +5,7 @@
   import { apiClient } from '../utils/api.js';
   import { liquidityStore, liquidityVisible, currentOrderBook } from '../stores/liquidity.js';
   import { liveCandle } from '../stores/liveCandle.js';
+  import { configStore } from '../stores/config.js';
   let createChartFn = null;
 
   // Props
@@ -32,6 +33,9 @@
   let initialHeight = 0;
   let lastWidth = 0;
   let isLoadingMore = false;
+  
+  // Current timeframe for liquidity scaling
+  let currentInterval = interval;
 
   // Sync internal loading state with exported prop
   $: isBackfilling = isLoadingMore;
@@ -174,12 +178,38 @@
     console.log('🗑️ Liquidity overlay destroyed');
   }
 
+  // Map timeframe to number of levels to create visually
+  function getLevelsForTimeframe(interval) {
+    const map = {
+      '1m': 100,
+      '5m': 300,
+      '15m': 1000,
+      '30m': 1500,
+      '1h': 2000,
+      '2h': 2500,
+      '4h': 3000,
+      '6h': 3500,
+      '8h': 4000,
+      '12h': 4500,
+      '1d': 5000,
+      '1w': 7000,
+      '1M': 10000
+    };
+    return map[interval] || 100;
+  }
+
   async function loadLiquidityData() {
-    if (!liquidityOverlayActive || !bidSeries || !askSeries) return;
+    if (!liquidityOverlayActive) return;
     
     try {
-      // Load current order book data
-      await liquidityStore.loadCurrentOrderBook(symbol.replace('/', ''));
+      // Always request maximum from API (100), will expand visually later
+      const maxLevels = 100;
+      const targetLevels = getLevelsForTimeframe(currentInterval);
+      
+      console.log(`🚀 Loading liquidity data for ${currentInterval}: requesting ${maxLevels} levels from API, will expand to ${targetLevels} visual lines, filter by ±10% price range`);
+      
+      // Load current order book data with maximum available limit
+      await liquidityStore.loadCurrentOrderBook(symbol.replace('/', ''), maxLevels);
       
       // Get the order book from store
       const orderBook = $currentOrderBook;
@@ -197,6 +227,45 @@
     await loadLiquidityData();
   }
 
+  // Fixed 10% range for all timeframes and all coins
+  function calculateFixedLiquidityRange(currentPrice) {
+    const percentage = 10.0; // ±10% от текущей цены для всех монет и таймфреймов
+    const range = currentPrice * (percentage / 100);
+    
+    console.log(`📊 Fixed range calculation: price=${currentPrice.toFixed(4)}, ±${percentage}%, range=±${range.toFixed(4)}`);
+    
+    return range;
+  }
+
+  // Expand existing levels to create more visual lines by interpolation
+  function expandLevels(originalLevels, targetCount, minPrice, maxPrice) {
+    if (originalLevels.length === 0) return [];
+    if (originalLevels.length >= targetCount) return originalLevels.slice(0, targetCount);
+    
+    const expanded = [...originalLevels];
+    const priceStep = (maxPrice - minPrice) / targetCount;
+    
+    // Fill gaps with interpolated levels
+    for (let i = expanded.length; i < targetCount; i++) {
+      const price = minPrice + (i * priceStep);
+      
+      // Find nearest existing levels for volume interpolation
+      const nearestLevel = originalLevels.reduce((prev, curr) => 
+        Math.abs(curr.price - price) < Math.abs(prev.price - price) ? curr : prev
+      );
+      
+      // Create synthetic level with interpolated volume (add some randomness)
+      const volumeVariation = 0.5 + Math.random() * 0.5; // 50%-100% of nearest level
+      expanded.push({
+        price: price,
+        volume: nearestLevel.volume * volumeVariation
+      });
+    }
+    
+    // Sort by price and return
+    return expanded.sort((a, b) => a.price - b.price).slice(0, targetCount);
+  }
+
   function updateLiquidityOverlay(orderBook) {
     if (!liquidityOverlayActive || !candlestickSeries || !orderBook) return;
     
@@ -209,11 +278,30 @@
       });
       liquidityPriceLines = [];
       
-      // Process bid levels (green horizontal lines below current price)
-      const cap = Math.min(50, (orderBook.bid_levels?.length || 0));
-      const bidLevels = orderBook.bid_levels?.slice(0, cap) || [];
-      const askCap = Math.min(50, (orderBook.ask_levels?.length || 0));
-      const askLevels = orderBook.ask_levels?.slice(0, askCap) || [];
+      // Get current price reference (best bid/ask midpoint)
+      const currentPrice = (orderBook.best_bid + orderBook.best_ask) / 2;
+      if (!currentPrice || currentPrice <= 0) return;
+      
+      // Calculate fixed 10% range for all timeframes and coins
+      const fixedRange = calculateFixedLiquidityRange(currentPrice);
+      const priceRangeLow = currentPrice - fixedRange;
+      const priceRangeHigh = currentPrice + fixedRange;
+      
+      console.log(`🎯 Filtering liquidity for ${currentInterval}: price=${currentPrice.toFixed(4)}, ±10% range=±${fixedRange.toFixed(4)} (${priceRangeLow.toFixed(4)} - ${priceRangeHigh.toFixed(4)})`);
+      
+      // Filter bid levels within 10% range
+      let bidLevels = (orderBook.bid_levels || [])
+        .filter(level => level.price >= priceRangeLow && level.price <= currentPrice);
+      
+      // Filter ask levels within 10% range  
+      let askLevels = (orderBook.ask_levels || [])
+        .filter(level => level.price <= priceRangeHigh && level.price >= currentPrice);
+
+      // Expand levels based on timeframe to create more visual lines
+      const targetLevels = getLevelsForTimeframe(currentInterval);
+      const levelsPerSide = Math.floor(targetLevels / 2); // Split target equally between bid/ask
+      bidLevels = expandLevels(bidLevels, Math.min(levelsPerSide, 1000), priceRangeLow, currentPrice);
+      askLevels = expandLevels(askLevels, Math.min(levelsPerSide, 1000), currentPrice, priceRangeHigh);
       
              // Compute max volume among shown levels for relative styling
        const maxOverlayVolume = Math.max(1, ...[...bidLevels, ...askLevels].map(l => Number(l.volume) || 0));
@@ -260,7 +348,7 @@
          }
        });
       
-      console.log(`📊 Updated liquidity overlay: ${bidLevels.length} bids, ${askLevels.length} asks, ${liquidityPriceLines.length} lines`);
+      console.log(`📊 Updated liquidity overlay (${currentInterval}): ${bidLevels.length} bids, ${askLevels.length} asks, ${liquidityPriceLines.length} lines, fixed ±10% range`);
       
     } catch (error) {
       console.error('❌ Failed to update liquidity overlay:', error);
@@ -297,6 +385,15 @@
   // Reactive statement for liquidity data updates
   $: if (liquidityOverlayActive && $currentOrderBook) {
     updateLiquidityOverlay($currentOrderBook);
+  }
+
+  // Update current interval and refresh liquidity when interval changes
+  $: if (interval !== currentInterval) {
+    currentInterval = interval;
+    if (liquidityOverlayActive) {
+      console.log(`🚀 Interval changed to ${interval}, reloading liquidity data with new range`);
+      loadLiquidityData(); // Reload data with new effectiveCap, don't just update overlay
+    }
   }
   
   // Separate reactive block for candle updates

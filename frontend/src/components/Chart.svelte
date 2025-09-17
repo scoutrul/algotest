@@ -8,6 +8,12 @@
   import { configStore } from '../stores/config.js';
   let createChartFn = null;
 
+  // Format price with spaces between thousands
+  function formatPrice(price) {
+    if (price === null || price === undefined) return '';
+    return price.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  }
+
   // Props
   export let candles = [];
   export let trades = [];
@@ -65,6 +71,11 @@
   let lastSymbol = symbol;
   let lastInterval = interval;
   
+  // Live candle connection state
+  let liveConnected = false;
+  let livePrice = null;
+  let livePriceChange = null;
+  
   // Function to completely reinitialize chart (like tab switching does)
   function reinitializeChart() {
     console.log('🔄 Completely reinitializing chart for symbol change');
@@ -85,6 +96,17 @@
       reachedHistoryStart = false; // Always reset history start flag
       liquidityPriceLines = [];
       liquidityOverlayActive = false;
+      
+      // Reset live price
+      livePrice = null;
+      livePriceChange = null;
+      
+      // Disconnect and reset live candle WebSocket
+      if (liveConnected) {
+        console.log('🔌 Disconnecting live candle WebSocket for symbol change');
+        liveCandle.disconnect();
+        liveConnected = false;
+      }
       
       // Reset all backfill-related state
       activeBackfillCount = 0;
@@ -113,6 +135,8 @@
           // Set tracking variables after chart is created
           prevInterval = interval;
           prevSymbol = symbol;
+          lastSymbol = symbol;
+          lastInterval = interval;
           
           // Setup backfill after chart is created
           setupBackfill();
@@ -121,6 +145,57 @@
           if (wasLiquidityActive) {
             setTimeout(() => initializeLiquidityOverlay(), 120);
           }
+          
+          // Reconnect live candle WebSocket for new symbol
+          setTimeout(() => {
+            console.log('🔌 Reconnecting live candle WebSocket for new symbol:', symbol, interval);
+            liveCandle.connect(symbol, interval, (k) => {
+              try {
+                console.log('🕯️ Live candle update:', k);
+                
+                // Update live price for legend
+                const previousPrice = livePrice;
+                livePrice = k.close;
+                if (previousPrice !== null) {
+                  livePriceChange = k.close - previousPrice;
+                }
+                
+                const barSec = Math.floor(k.timestamp / 1000);
+                const last = candles && candles[candles.length - 1];
+                
+                if (last && Math.floor(new Date(last.timestamp).getTime() / 1000) === barSec) {
+                  // Update existing candle
+                  console.log('📈 Updating existing candle');
+                  last.open = k.open;
+                  last.high = Math.max(last.high, k.high);
+                  last.low = Math.min(last.low, k.low);
+                  last.close = k.close;
+                  last.volume = k.volume;
+                } else if (k.isClosed) {
+                  // Add new closed candle
+                  console.log('🆕 Adding new closed candle');
+                  candles = [...(candles || []), {
+                    timestamp: k.timestamp,
+                    open: k.open, high: k.high, low: k.low, close: k.close,
+                    volume: k.volume,
+                  }];
+                } else {
+                  // Add new live candle
+                  console.log('🆕 Adding new live candle');
+                  candles = [...(candles || []), {
+                    timestamp: k.timestamp,
+                    open: k.open, high: k.high, low: k.low, close: k.close,
+                    volume: k.volume,
+                  }];
+                }
+                updateChart({ preserveViewport: true });
+              } catch (e) {
+                console.error('Error processing live candle:', e);
+              }
+            });
+            liveConnected = true;
+          }, 200);
+          
           // After reinit, trigger data reload from App.svelte
           // This will cause App.svelte to call updateChartData with new symbol/interval
           setTimeout(() => {
@@ -447,14 +522,37 @@
         if (liveConnected) liveCandle.disconnect();
         liveCandle.connect(symbol, interval, (k) => {
           try {
+            console.log('🕯️ Live candle update:', k);
+            
+            // Update live price for legend
+            const previousPrice = livePrice;
+            livePrice = k.close;
+            if (previousPrice !== null) {
+              livePriceChange = k.close - previousPrice;
+            }
+            
             const barSec = Math.floor(k.timestamp / 1000);
             const last = candles && candles[candles.length - 1];
+            
             if (last && Math.floor(new Date(last.timestamp).getTime() / 1000) === barSec) {
+              // Update existing candle
+              console.log('📈 Updating existing candle');
               last.open = k.open;
               last.high = Math.max(last.high, k.high);
               last.low = Math.min(last.low, k.low);
               last.close = k.close;
+              last.volume = k.volume;
             } else if (k.isClosed) {
+              // Add new closed candle
+              console.log('🆕 Adding new closed candle');
+              candles = [...(candles || []), {
+                timestamp: k.timestamp,
+                open: k.open, high: k.high, low: k.low, close: k.close,
+                volume: k.volume,
+              }];
+            } else {
+              // Add new live candle
+              console.log('🆕 Adding new live candle');
               candles = [...(candles || []), {
                 timestamp: k.timestamp,
                 open: k.open, high: k.high, low: k.low, close: k.close,
@@ -462,7 +560,9 @@
               }];
             }
             updateChart({ preserveViewport: true });
-          } catch (_) {}
+          } catch (e) {
+            console.error('Error processing live candle:', e);
+          }
         });
         liveConnected = true;
       } catch (_) {}
@@ -475,17 +575,50 @@
   $: if (chart && (symbol !== lastSymbol || interval !== lastInterval)) {
     (async () => {
       try {
+        console.log('🔄 Symbol/interval changed, reconnecting live stream:', symbol, interval, 'lastSymbol:', lastSymbol, 'lastInterval:', lastInterval);
+        
+        // Update tracking variables first
+        lastSymbol = symbol;
+        lastInterval = interval;
+        
+        // Reset live price
+        livePrice = null;
+        livePriceChange = null;
+        
         if (liveConnected) liveCandle.disconnect();
         liveCandle.connect(symbol, interval, (k) => {
           try {
+            console.log('🕯️ Live candle update:', k);
+            
+            // Update live price for legend
+            const previousPrice = livePrice;
+            livePrice = k.close;
+            if (previousPrice !== null) {
+              livePriceChange = k.close - previousPrice;
+            }
+            
             const barSec = Math.floor(k.timestamp / 1000);
             const last = candles && candles[candles.length - 1];
+            
             if (last && Math.floor(new Date(last.timestamp).getTime() / 1000) === barSec) {
+              // Update existing candle
+              console.log('📈 Updating existing candle');
               last.open = k.open;
               last.high = Math.max(last.high, k.high);
               last.low = Math.min(last.low, k.low);
               last.close = k.close;
+              last.volume = k.volume;
             } else if (k.isClosed) {
+              // Add new closed candle
+              console.log('🆕 Adding new closed candle');
+              candles = [...(candles || []), {
+                timestamp: k.timestamp,
+                open: k.open, high: k.high, low: k.low, close: k.close,
+                volume: k.volume,
+              }];
+            } else {
+              // Add new live candle
+              console.log('🆕 Adding new live candle');
               candles = [...(candles || []), {
                 timestamp: k.timestamp,
                 open: k.open, high: k.high, low: k.low, close: k.close,
@@ -493,7 +626,9 @@
               }];
             }
             updateChart({ preserveViewport: true });
-          } catch (_) {}
+          } catch (e) {
+            console.error('Error processing live candle:', e);
+          }
         });
         liveConnected = true;
       } catch (_) {}
@@ -566,6 +701,21 @@
         precision: 4,
         minMove: 0.0001,
       },
+    });
+
+    // Subscribe to crosshair movement for legend updates
+    chart.subscribeCrosshairMove((param) => {
+      if (param.time && param.seriesPrices) {
+        const price = param.seriesPrices.get(candlestickSeries);
+        if (price !== undefined) {
+          // Update live price for legend
+          const previousPrice = livePrice;
+          livePrice = price;
+          if (previousPrice !== null) {
+            livePriceChange = price - previousPrice;
+          }
+        }
+      }
     });
 
     // 🚀 Initialize liquidity overlay if needed
@@ -1277,7 +1427,19 @@
   <!-- Chart header -->
   <div class="chart-header">
     <div class="chart-title">
-      <h3>{symbol} - {interval}</h3>
+      <h3>
+        {symbol} - {interval}
+        {#if livePrice !== null}
+          <span class="live-price-header">
+            / ${formatPrice(livePrice)}
+            {#if livePriceChange !== null}
+              <span class="price-change {livePriceChange >= 0 ? 'positive' : 'negative'}">
+                {livePriceChange >= 0 ? '+' : ''}{formatPrice(livePriceChange)}
+              </span>
+            {/if}
+          </span>
+        {/if}
+      </h3>
       {#if loading}
         <span class="loading-indicator">
           <div class="spinner"></div>
@@ -1332,7 +1494,7 @@
 
   </div>
 
-  <!-- Chart legend -->
+  <!-- Trading signals legend -->
   {#if trades.length > 0}
     <div class="chart-legend">
       <div class="legend-item">
@@ -1384,6 +1546,26 @@
     font-size: 1.25rem;
     font-weight: 600;
     color: #2c3e50;
+  }
+
+  .live-price-header {
+    color: #3498db;
+    font-weight: 700;
+    margin-left: 0.5rem;
+  }
+
+  .live-price-header .price-change {
+    font-size: 0.875rem;
+    font-weight: 600;
+    margin-left: 0.25rem;
+  }
+
+  .live-price-header .price-change.positive {
+    color: #28a745;
+  }
+
+  .live-price-header .price-change.negative {
+    color: #dc3545;
   }
 
   .loading-indicator {
@@ -1507,6 +1689,7 @@
   .legend-color.loss {
     background: #ef5350;
   }
+
 
   /* Loading indicators */
   .loading-indicator {

@@ -18,6 +18,9 @@ pydantic==2.5.0
 httpx==0.25.2
 aiohttp==3.9.1
 
+# WebSocket Support
+websockets==12.0
+
 # CORS Support
 python-multipart==0.0.6
 

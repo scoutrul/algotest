@@ -1,18 +1,53 @@
 # Tasks - Source of Truth
 
 ## Current Task
-**PLAN Mode**: Планирование MVP BackTest Trading Bot
+**PLAN Mode**: Планирование backend WebSocket сервера для лайв-цены
 
-### Complexity Level: 3 (Intermediate)
-- Двухсервисная архитектура
-- Интеграция с внешним API
-- Интерактивная визуализация данных
-- Алгоритмическая логика стратегии
+### Complexity Level: 2 (Intermediate)
+- Backend WebSocket сервер (FastAPI WebSocket)
+- Проксирование Binance WebSocket через backend
+- Централизованное управление соединениями
+- Интеграция с существующей архитектурой
 
-### Active Tasks
-- [ ] Оптимизация производительности
-- [ ] Тестирование Docker деплоя
-- [ ] Production deployment
+### Plan Complete ✅
+**Архитектура**: WebSocket Proxy с централизованным управлением
+**Компоненты**: 4 backend компонента + frontend updates
+**Endpoints**: `/ws/live-candle/{symbol}/{interval}`, `/ws/health`
+**Data Format**: JSON с kline_update типом
+**Error Handling**: Auto-reconnection + fallback на Binance
+
+### Implementation Complete ✅
+**Phase 1**: Backend WebSocket Infrastructure ✅
+- [x] Добавить WebSocket зависимости (`websockets==12.0`)
+- [x] Создать WebSocket роутер (`websocket.py`)
+- [x] Реализовать WebSocket Manager (`websocket_manager.py`)
+- [x] Создать Binance WebSocket клиент (`binance_ws_client.py`)
+- [x] Создать WebSocket модели (`models/websocket.py`)
+
+**Phase 2**: WebSocket Integration ✅
+- [x] Интегрировать в `main.py`
+- [x] Добавить startup/shutdown события
+- [x] Реализовать connection pooling
+
+**Phase 3**: Frontend Integration ✅
+- [x] Обновить `liveCandle.js` с backend WebSocket
+- [x] Добавить fallback механизм на Binance
+- [x] Реализовать auto-reconnection
+
+**Phase 4**: Testing & Optimization ⚠️
+- [x] Backend запущен и протестирован
+- [x] Frontend запущен и протестирован
+- [x] WebSocket endpoints доступны
+- [x] **QA Testing Complete** - выявлена HTTP 403 проблема
+- [x] **Reflection Complete** - анализ завершен
+- [ ] Создать WebSocket тесты
+- [ ] Оптимизировать производительность
+- [ ] Исправить HTTP 403 проблему
+
+### Next Steps
+1. **IMPLEMENT Mode**: Реализация WebSocket сервера
+2. **QA Mode**: Тестирование интеграции
+3. **OPTIMIZE Mode**: Оптимизация производительности
 
 ### Creative Phases Completed
 - [x] Strategy Design: Hybrid Adaptive Strategy

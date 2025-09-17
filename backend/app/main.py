@@ -15,6 +15,8 @@ from .api.market import router as market_router
 from .api.data import router as data_router
 from .api.orderbook import router as orderbook_router
 from .api.basic import router as basic_router
+from .api.websocket import router as websocket_router
+from .api.test_websocket import router as test_websocket_router
 from .middleware.performance import PerformanceMiddleware
 from .services.database import db_service
 
@@ -56,6 +58,10 @@ app.include_router(backtest_router)
 app.include_router(performance_router, prefix="/api/v1", tags=["performance"])
 app.include_router(market_router)
 app.include_router(data_router)
+
+# 🔌 Include WebSocket router
+app.include_router(websocket_router, tags=["websocket"])
+app.include_router(test_websocket_router, tags=["test-websocket"])
 
 # 🚀 Include Order Book router (liquidity feature)
 if settings.LIQUIDITY_FEATURE_ENABLED:
@@ -139,6 +145,22 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"⚠️ Failed to schedule automatic data update: {e}")
 
+    # 🔌 Start WebSocket services
+    try:
+        from .services.binance_ws_client import binance_ws_client
+        import asyncio
+        
+        logger.info("🔌 Starting WebSocket services...")
+        
+        # Start Binance WebSocket client
+        asyncio.create_task(binance_ws_client.start())
+        logger.info("✅ WebSocket services started")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to start WebSocket services: {e}")
+        # Don't raise here - let the app start without WebSocket
+        logger.warning("⚠️ Application will continue without WebSocket services")
+
     # 🚀 Start Order Book collection if enabled
     if settings.LIQUIDITY_FEATURE_ENABLED:
         try:
@@ -162,6 +184,15 @@ async def startup_event():
 async def shutdown_event():
     """Application shutdown event."""
     logger.info("🛑 BackTest Trading Bot API shutting down...")
+    
+    # Stop WebSocket services
+    try:
+        from .services.binance_ws_client import binance_ws_client
+        logger.info("🔌 Stopping WebSocket services...")
+        await binance_ws_client.stop()
+        logger.info("✅ WebSocket services stopped")
+    except Exception as e:
+        logger.warning(f"⚠️ Error stopping WebSocket services: {e}")
     
     # Stop Order Book collection if running
     if settings.LIQUIDITY_FEATURE_ENABLED:

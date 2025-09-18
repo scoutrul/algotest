@@ -1,11 +1,14 @@
 <!-- Trading Chart Component with TradingView Lightweight Charts -->
 <script>
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
-  import { chartUtils } from '../utils/chart.js';
+ 
   import { apiClient } from '../utils/api.js';
   import { liquidityStore, liquidityVisible, currentOrderBook } from '../stores/liquidity.js';
   import { liveCandle } from '../stores/liveCandle.js';
   import { configStore } from '../stores/config.js';
+  import SymbolBadges from './SymbolBadges.svelte';
+  import IntervalSwitcher from './IntervalSwitcher.svelte';
+  import ChartHeader from './ChartHeader.svelte';
   let createChartFn = null;
 
   // Format price with spaces between thousands
@@ -41,8 +44,6 @@
   let resizeObserver;
   
   // 🚀 Liquidity overlay state
-  let bidSeries = null;
-  let askSeries = null;
   let liquidityOverlayActive = false;
   let initialHeight = 0;
   let lastWidth = 0;
@@ -1284,122 +1285,15 @@
 
 
   // 🚀 Liquidity Overlay Functions
-  function initializeLiquidityOverlay_OLD() {
-    if (!chart || liquidityOverlayActive) return;
 
-    try {
-      // Create bid series (green, negative values for left side)
-      bidSeries = chart.addHistogramSeries({
-        color: 'rgba(38, 166, 154, 0.4)',
-        priceFormat: {
-          type: 'volume',
-        },
-        priceScaleId: 'liquidity', // Use separate price scale
-      });
 
-      // Create ask series (red, positive values for right side)  
-      askSeries = chart.addHistogramSeries({
-        color: 'rgba(239, 83, 80, 0.4)',
-        priceFormat: {
-          type: 'volume',
-        },
-        priceScaleId: 'liquidity', // Use separate price scale
-      });
-
-      // Configure liquidity price scale
-      chart.priceScale('liquidity').applyOptions({
-        position: 'left',
-        scaleMargins: {
-          top: 0.7,
-          bottom: 0.1,
-        },
-        borderVisible: false,
-      });
-
-      liquidityOverlayActive = true;
-      console.log('✅ Liquidity overlay initialized');
-
-      // Load initial data
-      updateLiquidityData();
-
-    } catch (error) {
-      console.error('❌ Failed to initialize liquidity overlay:', error);
-    }
-  }
-
-  function removeLiquidityOverlay_OLD() {
-    if (!chart || !liquidityOverlayActive) return;
-
-    try {
-      if (bidSeries) {
-        chart.removeSeries(bidSeries);
-        bidSeries = null;
-      }
-      if (askSeries) {
-        chart.removeSeries(askSeries);
-        askSeries = null;
-      }
-
-      liquidityOverlayActive = false;
-      console.log('✅ Liquidity overlay removed');
-
-    } catch (error) {
-      console.error('❌ Failed to remove liquidity overlay:', error);
-    }
-  }
-
-  async function updateLiquidityData_OLD() {
-    if (!liquidityOverlayActive || !bidSeries || !askSeries) return;
-
-    try {
-      // Load current order book data
-      const { liquidityStore } = await import('../stores/liquidity.js');
-      await liquidityStore.loadCurrentOrderBook(symbol);
-      
-      // Get current order book data from store
-      const orderBook = $currentOrderBook;
-      if (!orderBook || !orderBook.bid_levels || !orderBook.ask_levels) {
-        console.log('⚠️ No order book data available');
-        return;
-      }
-
-      const currentTime = Math.floor(Date.now() / 1000);
-
-      // Create single data point for each series (TradingView format)
-      const bidData = [{
-        time: currentTime,
-        value: orderBook.total_bid_volume * 100, // Scale for visibility
-        color: 'rgba(38, 166, 154, 0.6)'
-      }];
-
-      const askData = [{
-        time: currentTime,
-        value: orderBook.total_ask_volume * 100, // Scale for visibility  
-        color: 'rgba(239, 83, 80, 0.6)'
-      }];
-
-      // Update series data
-      bidSeries.setData(bidData);
-      askSeries.setData(askData);
-
-      console.log('✅ Liquidity data updated', {
-        bidVolume: orderBook.total_bid_volume,
-        askVolume: orderBook.total_ask_volume,
-        spread: orderBook.spread,
-        timestamp: currentTime
-      });
-
-    } catch (error) {
-      console.error('❌ Failed to update liquidity data:', error);
-    }
-  }
 
   // React to liquidity visibility changes
   $: if (chart) {
     if ($liquidityVisible && !liquidityOverlayActive) {
       initializeLiquidityOverlay();
     } else if (!$liquidityVisible && liquidityOverlayActive) {
-      removeLiquidityOverlay();
+      destroyLiquidityOverlay();
     }
   }
 
@@ -1410,80 +1304,45 @@
 </script>
 
 <div class="chart-container">
-  <!-- сюда перенеси symbols  -->
-  <div class="symbol-badges">
-    <label for="symbol-badges" class="symbol-label">Symbol</label>
-    <div class="badge-container" id="symbol-badges" role="group" aria-label="Select trading symbol">
-      {#each availableSymbols as sym}
-        <button
-          class="badge {selectedSymbol === sym ? 'badge-active' : 'badge-inactive'}"
-          on:click={() => handleSymbolChange(sym)}
-          disabled={loading}
-        >
-          {sym}
-        </button>
-      {/each}
-    </div>
-  </div>
-  <!-- 📊 Interval Switcher - отдельная строка -->
-  <div class="interval-switcher">
-    {#each availableIntervals as interval}
-      <button
-        class="interval-btn {selectedInterval === interval ? 'interval-btn-active' : 'interval-btn-inactive'}"
-        on:click={() => handleIntervalChange(interval)}
-        title="Select time interval: {interval}"
-      >
-        {interval}
-      </button>
-    {/each}
-  </div>
-  <!-- Chart header -->
-  <div class="chart-header">
-    <div class="chart-title">
-      <h3>
-        {symbol} - {interval}
-        {#if livePrice !== null}
-          <span class="live-price-header">
-            / ${formatPrice(livePrice)}
-            {#if livePriceChange !== null}
-              <span class="price-change {livePriceChange >= 0 ? 'positive' : 'negative'}">
-                {livePriceChange >= 0 ? '+' : ''}{formatPrice(livePriceChange)}
-              </span>
-            {/if}
-          </span>
-        {/if}
-      </h3>
-      {#if loading}
-        <span class="loading-indicator">
-          <div class="spinner"></div>
-          Loading chart data...
-        </span>
-      {:else if isBackfilling}
-        <span class="loading-indicator backfilling">
-          <div class="spinner"></div>
-          Loading more data...
-        </span>
-      {/if}
-    </div>
+  <SymbolBadges
+    selectedSymbol={selectedSymbol}
+    loading={loading}
+    on:symbolSelect={(e) => handleSymbolChange(e.detail)}
+  />
 
-    <div class="chart-controls">
-      <!-- 🚀 Liquidity Toggle Button -->
-      {#if liquidityFeatureAvailable}
-        <button 
-          class="btn {$liquidityVisible ? 'btn-liquidity-active' : 'btn-liquidity'}"
-          on:click={handleLiquidityToggle}
-          title={$liquidityVisible ? 'Hide liquidity overlay' : 'Show liquidity overlay'}
-        >
-          <span class="icon">💧</span>
-          {$liquidityVisible ? 'Hide Liquidity' : 'Show Liquidity'}
-        </button>
-      {/if}
-      
-      <button class="btn btn-primary" on:click={toggleFullscreen} title="Toggle Fullscreen">
-        {fullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+  
+  <!-- 📊 Interval Switcher - отдельная строка -->
+  <IntervalSwitcher
+    {availableIntervals}
+    {selectedInterval}
+    on:intervalSelect={(e) => handleIntervalChange(e.detail)}
+  />
+
+
+  <!-- Chart header -->
+  <ChartHeader
+    {symbol}
+    {interval}
+    {livePrice}
+    {livePriceChange}
+    {loading}
+    {isBackfilling}
+  >
+    {#if liquidityFeatureAvailable}
+      <button 
+        class="btn {$liquidityVisible ? 'btn-liquidity-active' : 'btn-liquidity'}"
+        on:click={handleLiquidityToggle}
+        title={$liquidityVisible ? 'Hide liquidity overlay' : 'Show liquidity overlay'}
+      >
+        <span class="icon">💧</span>
+        {$liquidityVisible ? 'Hide Liquidity' : 'Show Liquidity'}
       </button>
-    </div>
-  </div>
+    {/if}
+    
+    <button class="btn btn-primary" on:click={toggleFullscreen} title="Toggle Fullscreen">
+      {fullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+    </button>
+  </ChartHeader>
 
   <!-- Chart wrapper -->
   <div class="chart-wrapper" bind:this={chartContainer}>
@@ -1537,52 +1396,13 @@
   .chart-container {
     display: flex;
     flex-direction: column;
+    padding: 0.5rem;
+    gap: 0.5rem;
     height: 100%;
     max-height: max-content;
     background: white;
   }
 
-  .chart-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1rem;
-    border-bottom: 1px solid #e0e0e0;
-    background: #f8f9fa;
-  }
-
-  .chart-title {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
-
-  .chart-title h3 {
-    margin: 0;
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: #2c3e50;
-  }
-
-  .live-price-header {
-    color: #3498db;
-    font-weight: 700;
-    margin-left: 0.5rem;
-  }
-
-  .live-price-header .price-change {
-    font-size: 0.875rem;
-    font-weight: 600;
-    margin-left: 0.25rem;
-  }
-
-  .live-price-header .price-change.positive {
-    color: #28a745;
-  }
-
-  .live-price-header .price-change.negative {
-    color: #dc3545;
-  }
 
   .loading-indicator {
     color: #3498db;
@@ -1708,28 +1528,6 @@
 
 
   /* Loading indicators */
-  .loading-indicator {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    color: #3498db;
-    font-size: 0.875rem;
-    font-weight: 500;
-    margin-left: 1rem;
-  }
-
-  .loading-indicator.backfilling {
-    color: #f39c12;
-  }
-
-  .spinner {
-    width: 16px;
-    height: 16px;
-    border: 2px solid #e0e0e0;
-    border-top: 2px solid currentColor;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
 
   /* Chart loading overlay */
   .chart-loading-overlay {
@@ -1817,161 +1615,8 @@
     filter: drop-shadow(0 1px 1px rgba(0,0,0,0.2));
   }
 
-  /* Symbol badges styles */
-  .symbol-badges {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    padding: 0 1rem;
-    margin-top: 0.5rem;
-  }
-
-  .symbol-label {
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: #2c3e50;
-  }
-
-  .badge-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-top: 0.25rem;
-  }
-
-  .badge {
-    padding: 0.375rem 0.75rem;
-    border: 1px solid #ddd;
-    border-radius: 20px;
-    font-size: 0.875rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    background: white;
-    color: #333;
-    min-width: auto;
-    white-space: nowrap;
-  }
-
-  .badge:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  }
-
-  .badge-active {
-    background: #3498db;
-    color: white;
-    border-color: #3498db;
-    box-shadow: 0 2px 4px rgba(52, 152, 219, 0.3);
-  }
-
-  .badge-active:hover:not(:disabled) {
-    background: #2980b9;
-    border-color: #2980b9;
-    box-shadow: 0 4px 8px rgba(52, 152, 219, 0.4);
-  }
-
-  .badge-inactive {
-    background: white;
-    color: #666;
-    border-color: #ddd;
-  }
-
-  .badge-inactive:hover:not(:disabled) {
-    background: #f8f9fa;
-    border-color: #bbb;
-    color: #333;
-  }
-
-  .badge:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none;
-  }
-
-  .badge:focus {
-    outline: none;
-    box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
-  }
-
   /* 📊 Interval switcher styles */
-  .interval-switcher {
-    display: flex;
-    flex-direction: row;
-    gap: 4px;
-    margin-right: 0;
-    margin-bottom: 0.5rem;
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .interval-btn {
-    all: initial;
-    font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif;
-    font-size: 12px;
-    font-style: normal;
-    font-weight: 500;
-    line-height: 16px;
-    letter-spacing: -0.2px;
-    padding: 4px 8px;
-    color: rgba(19, 23, 34, 1);
-    background-color: rgba(240, 243, 250, 1);
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    min-width: 32px;
-    text-align: center;
-  }
-
-  .interval-btn:hover {
-    background-color: rgba(224, 227, 235, 1);
-  }
-
-  .interval-btn:active {
-    background-color: rgba(209, 212, 220, 1);
-  }
-
-  .interval-btn-active {
-    background-color: rgba(52, 152, 219, 1) !important;
-    color: white !important;
-  }
-
-  .interval-btn-active:hover {
-    background-color: rgba(41, 128, 185, 1) !important;
-  }
-
-  .interval-btn-inactive {
-    background-color: rgba(240, 243, 250, 1);
-    color: rgba(19, 23, 34, 1);
-  }
 
 
   /* Responsive adjustments */
-  @media (max-width: 768px) {
-    .chart-header {
-      flex-direction: column;
-      gap: 1rem;
-      align-items: stretch;
-    }
-
-    .chart-controls {
-      justify-content: center;
-    }
-
-    .chart-legend {
-      justify-content: center;
-    }
-
-    .interval-switcher {
-      flex-wrap: wrap;
-      justify-content: center;
-      margin-bottom: 0.75rem;
-    }
-
-    .interval-btn {
-      font-size: 11px;
-      padding: 3px 6px;
-      min-width: 28px;
-    }
-  }
 </style>

@@ -698,7 +698,7 @@
       },
       rightPriceScale: {
         borderColor: '#cccccc',
-        autoScale: true,
+        autoScale: false,
         scaleMargins: {
           top: 0.1,
           bottom: 0.1,

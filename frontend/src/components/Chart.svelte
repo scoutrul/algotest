@@ -705,11 +705,32 @@
         },
         // 4 decimal digits on axis
         entireTextOnly: false,
+        // Enable panning on price scale
+        handleScale: {
+          mouseWheel: true,
+          pinch: true,
+          axisPressedMouseMove: true,
+        },
       },
       timeScale: {
         borderColor: '#cccccc',
         timeVisible: true,
         secondsVisible: false,
+        // Enable panning (drag) in any zoom level
+        handleScroll: {
+          mouseWheel: true,
+          pressedMouseMove: true,
+          horzTouchDrag: true,
+          vertTouchDrag: true,
+        },
+        handleScale: {
+          mouseWheel: true,
+          pinch: true,
+          axisPressedMouseMove: {
+            time: true,
+            price: true,
+          },
+        },
       },
     });
 

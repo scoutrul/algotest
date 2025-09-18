@@ -23,12 +23,6 @@
     dispatch('symbolChanged', { symbol: selectedSymbol, interval: selectedInterval });
   }
 
-  function handleIntervalChange(interval) {
-    selectedInterval = interval;
-    configStore.setSelectedInterval(selectedInterval);
-    // Dispatch event to update chart data only (no backtest)
-    dispatch('intervalChanged', { symbol: selectedSymbol, interval: selectedInterval });
-  }
 
   function handleQuickBacktest() {
     // Ensure we have valid values
@@ -66,20 +60,6 @@
     </div>
   </div>
 
-  <div class="control-group">
-    <label for="interval-badges">Interval</label>
-    <div class="badge-container" id="interval-badges" role="group" aria-label="Select time interval">
-      {#each availableIntervals as interval}
-        <button
-          class="badge {selectedInterval === interval ? 'badge-active' : 'badge-inactive'}"
-          on:click={() => handleIntervalChange(interval)}
-          disabled={loading}
-        >
-          {interval}
-        </button>
-      {/each}
-    </div>
-  </div>
 
   <div class="control-group">
     <button 

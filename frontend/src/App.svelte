@@ -100,8 +100,10 @@
   }
 
   async function handleIntervalChanged(event) {
+    configStore.setSelectedInterval(event.detail.interval);
     await updateChartData(event.detail.symbol, event.detail.interval);
   }
+
 
   // Update chart data without running backtest
   async function updateChartData(symbol, interval) {
@@ -183,7 +185,6 @@
             {loading}
             on:backtest={handleBacktest}
             on:symbolChanged={handleSymbolChanged}
-            on:intervalChanged={handleIntervalChanged}
           />
         {/if}
       </div>
@@ -221,8 +222,11 @@
           bind:isBackfilling
           liquidityFeatureAvailable={true}
           selectedSymbol={config.selectedSymbol}
+          availableIntervals={config.availableIntervals}
+          selectedInterval={config.selectedInterval}
           on:reloadData={handleChartReload}
           on:liquidityToggled={handleLiquidityToggled}
+          on:intervalChanged={handleIntervalChanged}
         />
         
       </section>

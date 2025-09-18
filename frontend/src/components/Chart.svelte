@@ -25,6 +25,10 @@
   // Export loading states for parent components
   export let isBackfilling = false;
 
+  // Liquidity props
+  export let liquidityFeatureAvailable = true;
+  export let selectedSymbol = 'BTC/USDT';
+
   // Component state
   let chartContainer;
   let chart;
@@ -669,7 +673,23 @@
         horzLines: { color: '#f0f0f0' },
       },
       crosshair: {
-        mode: 1,
+        // Change mode from default 'magnet' to 'normal'.
+        // Allows the crosshair to move freely without snapping to datapoints
+        mode: 0, // LightweightCharts.CrosshairMode.Normal
+
+        // Vertical crosshair line (showing Date in Label)
+        vertLine: {
+          width: 8,
+          color: '#C3BCDB44',
+          style: 0, // LightweightCharts.LineStyle.Solid
+          labelBackgroundColor: '#9B7DFF',
+        },
+
+        // Horizontal crosshair line (showing Price in Label)
+        horzLine: {
+          color: '#9B7DFF',
+          labelBackgroundColor: '#9B7DFF',
+        },
       },
       rightPriceScale: {
         borderColor: '#cccccc',
@@ -1278,24 +1298,24 @@
     dispatch('toggleFullscreen', { fullscreen });
   }
 
-  function resetZoom() {
-    if (chart) {
-      chart.timeScale().fitContent();
+  // 🚀 Liquidity toggle function
+  function handleLiquidityToggle() {
+    if ($liquidityVisible) {
+      liquidityStore.hide();
+    } else {
+      liquidityStore.show();
+      // Load liquidity data for current symbol
+      const symbolForLiquidity = selectedSymbol && selectedSymbol !== 'undefined' ? selectedSymbol : 'BTC/USDT';
+      liquidityStore.loadCurrentOrderBook(symbolForLiquidity.replace('/', ''));
     }
+    
+    // Dispatch event to notify parent about liquidity toggle
+    dispatch('liquidityToggled', { 
+      visible: !$liquidityVisible,
+      symbol: selectedSymbol 
+    });
   }
 
-  function exportChart() {
-    if (chart) {
-      // Simple export functionality
-      const canvas = chartContainer.querySelector('canvas');
-      if (canvas) {
-        const link = document.createElement('a');
-        link.download = `${symbol}_${interval}_chart.png`;
-        link.href = canvas.toDataURL();
-        link.click();
-      }
-    }
-  }
 
   // 🚀 Liquidity Overlay Functions
   function initializeLiquidityOverlay_OLD() {
@@ -1453,16 +1473,18 @@
       {/if}
     </div>
     <div class="chart-controls">
-      <button class="btn btn-secondary" on:click={resetZoom} title="Reset Zoom">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-        </svg>
-      </button>
-      <button class="btn btn-secondary" on:click={exportChart} title="Export Chart">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
-        </svg>
-      </button>
+      <!-- 🚀 Liquidity Toggle Button -->
+      {#if liquidityFeatureAvailable}
+        <button 
+          class="btn {$liquidityVisible ? 'btn-liquidity-active' : 'btn-liquidity'}"
+          on:click={handleLiquidityToggle}
+          title={$liquidityVisible ? 'Hide liquidity overlay' : 'Show liquidity overlay'}
+        >
+          <span class="icon">💧</span>
+          {$liquidityVisible ? 'Hide Liquidity' : 'Show Liquidity'}
+        </button>
+      {/if}
+      
       <button class="btn btn-primary" on:click={toggleFullscreen} title="Toggle Fullscreen">
         {fullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
       </button>
@@ -1770,6 +1792,38 @@
     50% { opacity: 0.6; }
   }
 
+  /* 🚀 Liquidity button styles */
+  .btn-liquidity {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: 1px solid #667eea;
+  }
+
+  .btn-liquidity:hover:not(:disabled) {
+    background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+  }
+
+  .btn-liquidity-active {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    color: white;
+    border: 1px solid #11998e;
+    box-shadow: 0 2px 4px rgba(17, 153, 142, 0.3);
+  }
+
+  .btn-liquidity-active:hover:not(:disabled) {
+    background: linear-gradient(135deg, #0e8074 0%, #2dd4bf 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(17, 153, 142, 0.4);
+  }
+
+  .icon {
+    font-size: 1rem;
+    filter: drop-shadow(0 1px 1px rgba(0,0,0,0.2));
+  }
+
+
   /* Responsive adjustments */
   @media (max-width: 768px) {
     .chart-header {
@@ -1785,6 +1839,5 @@
     .chart-legend {
       justify-content: center;
     }
-
   }
 </style>

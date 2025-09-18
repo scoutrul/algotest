@@ -2,8 +2,6 @@
 <script>
   import { createEventDispatcher, onMount } from 'svelte';
   import { configStore } from '../stores/config.js';
-  import { liquidityStore, liquidityState } from '../stores/liquidity.js';
-  import { apiClient } from '../utils/api.js';
 
   // Props
   export let selectedSymbol = 'BTC/USDT';
@@ -17,19 +15,16 @@
   $: availableSymbols = $configStore.availableSymbols;
   $: availableIntervals = $configStore.availableIntervals;
 
-  // Liquidity state
-  let liquidityFeatureAvailable = true;
-
   // Event handlers
-  function handleSymbolChange(event) {
-    selectedSymbol = event.target.value;
+  function handleSymbolChange(symbol) {
+    selectedSymbol = symbol;
     configStore.setSelectedSymbol(selectedSymbol);
     // Dispatch event to update chart data only (no backtest)
     dispatch('symbolChanged', { symbol: selectedSymbol, interval: selectedInterval });
   }
 
-  function handleIntervalChange(event) {
-    selectedInterval = event.target.value;
+  function handleIntervalChange(interval) {
+    selectedInterval = interval;
     configStore.setSelectedInterval(selectedInterval);
     // Dispatch event to update chart data only (no backtest)
     dispatch('intervalChanged', { symbol: selectedSymbol, interval: selectedInterval });
@@ -50,71 +45,40 @@
     dispatch('backtest', params);
   }
 
-  function handleLiquidityToggle() {
-    if ($liquidityState.visible) {
-      liquidityStore.hide();
-    } else {
-      liquidityStore.show();
-      // Load liquidity data for current symbol
-      const symbol = selectedSymbol && selectedSymbol !== 'undefined' ? selectedSymbol : 'BTC/USDT';
-      liquidityStore.loadCurrentOrderBook(symbol.replace('/', ''));
-    }
-    
-    // Dispatch event to notify chart about liquidity toggle
-    dispatch('liquidityToggled', { 
-      visible: !$liquidityState.visible,
-      symbol: selectedSymbol 
-    });
-  }
 
 
 
-  // Check liquidity feature availability on mount
-  onMount(async () => {
-    try {
-      liquidityFeatureAvailable = await apiClient.isLiquidityFeatureAvailable();
-      if (liquidityFeatureAvailable) {
-        liquidityStore.enable();
-        console.log('✅ Liquidity feature enabled');
-      } else {
-        console.log('⚠️ Liquidity feature not available');
-      }
-    } catch (error) {
-      console.warn('Failed to check liquidity feature availability:', error);
-      liquidityFeatureAvailable = false;
-    }
-  });
 </script>
 
 <div class="controls">
   <div class="control-group">
-    <label for="symbol-select">Symbol</label>
-    <select
-      id="symbol-select"
-      bind:value={selectedSymbol}
-      on:change={handleSymbolChange}
-      disabled={loading}
-      class="control-select"
-    >
+    <label for="symbol-badges">Symbol</label>
+    <div class="badge-container" id="symbol-badges" role="group" aria-label="Select trading symbol">
       {#each availableSymbols as symbol}
-        <option value={symbol}>{symbol}</option>
+        <button
+          class="badge {selectedSymbol === symbol ? 'badge-active' : 'badge-inactive'}"
+          on:click={() => handleSymbolChange(symbol)}
+          disabled={loading}
+        >
+          {symbol}
+        </button>
       {/each}
-    </select>
+    </div>
   </div>
 
   <div class="control-group">
-    <label for="interval-select">Interval</label>
-    <select
-      id="interval-select"
-      bind:value={selectedInterval}
-      on:change={handleIntervalChange}
-      disabled={loading}
-      class="control-select"
-    >
+    <label for="interval-badges">Interval</label>
+    <div class="badge-container" id="interval-badges" role="group" aria-label="Select time interval">
       {#each availableIntervals as interval}
-        <option value={interval}>{interval}</option>
+        <button
+          class="badge {selectedInterval === interval ? 'badge-active' : 'badge-inactive'}"
+          on:click={() => handleIntervalChange(interval)}
+          disabled={loading}
+        >
+          {interval}
+        </button>
       {/each}
-    </select>
+    </div>
   </div>
 
   <div class="control-group">
@@ -127,30 +91,6 @@
     </button>
   </div>
 
-  <!-- 🚀 Liquidity Toggle Button -->
-  {#if liquidityFeatureAvailable}
-    <div class="control-group">
-      <button 
-        class="btn {$liquidityState.visible ? 'btn-liquidity-active' : 'btn-liquidity'}"
-        on:click={handleLiquidityToggle}
-        title={$liquidityState.visible ? 'Hide liquidity overlay' : 'Show liquidity overlay'}
-      >
-        <span class="icon">💧</span>
-        {$liquidityState.visible ? 'Hide Liquidity' : 'Show Liquidity'}
-      </button>
-      
-      <!-- Simple status indicator - only when visible -->
-      {#if $liquidityState.visible}
-        <div class="liquidity-status">
-          <span class="status-indicator {$liquidityState.hasData ? 'status-active' : 'status-loading'}" 
-                title={$liquidityState.hasData ? 'Liquidity data active' : 'Loading liquidity data'}>●</span>
-          <span class="status-text">
-            {$liquidityState.hasData ? 'Active' : 'Loading...'}
-          </span>
-        </div>
-      {/if}
-    </div>
-  {/if}
 </div>
 
 <style>
@@ -174,25 +114,66 @@
     margin-bottom: 0.25rem;
   }
 
-  .control-select {
-    padding: 0.5rem;
+  .badge-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+  }
+
+  .badge {
+    padding: 0.375rem 0.75rem;
     border: 1px solid #ddd;
-    border-radius: 4px;
+    border-radius: 20px;
     font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
     background: white;
     color: #333;
-    min-width: 120px;
+    min-width: auto;
+    white-space: nowrap;
   }
 
-  .control-select:focus {
-    outline: none;
+  .badge:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+
+  .badge-active {
+    background: #3498db;
+    color: white;
     border-color: #3498db;
-    box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+    box-shadow: 0 2px 4px rgba(52, 152, 219, 0.3);
   }
 
-  .control-select:disabled {
+  .badge-active:hover:not(:disabled) {
+    background: #2980b9;
+    border-color: #2980b9;
+    box-shadow: 0 4px 8px rgba(52, 152, 219, 0.4);
+  }
+
+  .badge-inactive {
+    background: white;
+    color: #666;
+    border-color: #ddd;
+  }
+
+  .badge-inactive:hover:not(:disabled) {
+    background: #f8f9fa;
+    border-color: #bbb;
+    color: #333;
+  }
+
+  .badge:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+    transform: none;
+  }
+
+  .badge:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
   }
 
   .btn {
@@ -234,83 +215,6 @@
     border-color: #2980b9;
   }
 
-  /* 🚀 Liquidity button styles */
-  .btn-liquidity {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    border: 1px solid #667eea;
-  }
-
-  .btn-liquidity:hover:not(:disabled) {
-    background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
-  }
-
-  .btn-liquidity-active {
-    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-    color: white;
-    border: 1px solid #11998e;
-    box-shadow: 0 2px 4px rgba(17, 153, 142, 0.3);
-  }
-
-  .btn-liquidity-active:hover:not(:disabled) {
-    background: linear-gradient(135deg, #0e8074 0%, #2dd4bf 100%);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(17, 153, 142, 0.4);
-  }
-
-  .icon {
-    font-size: 1rem;
-    filter: drop-shadow(0 1px 1px rgba(0,0,0,0.2));
-  }
-
-  .loading-spinner {
-    width: 12px;
-    height: 12px;
-    border: 2px solid rgba(255,255,255,0.3);
-    border-radius: 50%;
-    border-top-color: white;
-    animation: spin 1s ease-in-out infinite;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  /* Liquidity status indicator */
-  .liquidity-status {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.8);
-    margin-top: 0.25rem;
-  }
-
-  .status-indicator {
-    font-size: 0.5rem;
-    line-height: 1;
-  }
-
-  .status-active {
-    color: #38ef7d;
-    animation: pulse 2s ease-in-out infinite;
-  }
-
-  .status-loading {
-    color: #ffd700;
-    animation: pulse 1s ease-in-out infinite;
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
-
-  .status-text {
-    font-weight: 500;
-  }
 
   /* Responsive design */
   @media (max-width: 768px) {
@@ -321,28 +225,39 @@
     }
 
     .control-group {
-      flex-direction: row;
-      align-items: center;
-      justify-content: space-between;
+      flex-direction: column;
+      align-items: stretch;
     }
 
     .control-group label {
-      margin-bottom: 0;
-      min-width: 80px;
+      margin-bottom: 0.5rem;
+      text-align: center;
     }
 
-    .control-select {
-      flex: 1;
-      min-width: auto;
+    .badge-container {
+      justify-content: center;
+      gap: 0.375rem;
+    }
+
+    .badge {
+      font-size: 0.8rem;
+      padding: 0.3rem 0.6rem;
     }
 
     .btn {
       width: 100%;
     }
+  }
 
-    .liquidity-status {
-      justify-content: center;
-      margin-top: 0.5rem;
+  /* Extra small screens */
+  @media (max-width: 480px) {
+    .badge-container {
+      gap: 0.25rem;
+    }
+
+    .badge {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.5rem;
     }
   }
 </style>

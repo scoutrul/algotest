@@ -184,7 +184,6 @@
             on:backtest={handleBacktest}
             on:symbolChanged={handleSymbolChanged}
             on:intervalChanged={handleIntervalChanged}
-            on:liquidityToggled={handleLiquidityToggled}
           />
         {/if}
       </div>
@@ -220,7 +219,10 @@
           bind:fullscreen={chartFullscreen}
           {loading}
           bind:isBackfilling
+          liquidityFeatureAvailable={true}
+          selectedSymbol={config.selectedSymbol}
           on:reloadData={handleChartReload}
+          on:liquidityToggled={handleLiquidityToggled}
         />
         
       </section>

@@ -54,7 +54,9 @@ class Settings:
         "SOL/USDT",
         "XRP/USDT",
         "DOT/USDT",
-        "DOGE/USDT"
+        "DOGE/USDT",
+        "BAN/USDT",
+        "MYX/USDT"
     ]
     
     # Supported Intervals

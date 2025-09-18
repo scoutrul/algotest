@@ -33,6 +33,9 @@ class OrderBookCollector:
                 },
                 'sandbox': False,  # Use production API
             })
+            
+            # Load markets to ensure exchange is properly initialized
+            self.exchange.load_markets()
             self.logger.info(f"Initialized {self.exchange_name} exchange connector")
         except AttributeError:
             self.logger.error(f"Unsupported exchange: {self.exchange_name}")
@@ -67,10 +70,17 @@ class OrderBookCollector:
         try:
             self.logger.debug(f"Collecting order book for {symbol}")
             
+            # Binance spot API supports limits: 5, 10, 20, 50, 100, 500, 1000, 5000
+            # Use the closest supported limit
+            binance_limits = [5, 10, 20, 50, 100, 500, 1000, 5000]
+            actual_limit = min(binance_limits, key=lambda x: abs(x - self.order_book_limit))
+            
+            self.logger.debug(f"Using limit {actual_limit} for {symbol} (requested: {self.order_book_limit})")
+            
             # Fetch order book from exchange (sync call for ccxt)
             orderbook = self.exchange.fetch_order_book(
                 symbol, 
-                limit=self.order_book_limit
+                limit=actual_limit
             )
             
             # Filter out small volume levels
@@ -310,7 +320,8 @@ class OrderBookCollector:
             # Test order book fetch for first symbol
             if self.symbols:
                 test_symbol = self.symbols[0]
-                orderbook = self.exchange.fetch_order_book(test_symbol, limit=5)
+                # Use a safe limit that works for all exchanges
+                orderbook = self.exchange.fetch_order_book(test_symbol, limit=20)
                 
                 return {
                     'success': True,

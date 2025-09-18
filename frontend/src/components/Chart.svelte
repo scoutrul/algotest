@@ -854,61 +854,6 @@
     // Update candlestick series without changing viewport
     candlestickSeries.setData(chartData);
 
-    // TEMPORARILY DISABLED: Auto-focus logic that conflicts with backfill
-    // if (!preserveViewport && realData.length) {
-    //   // Reset both time and price scales when viewport needs reset
-    //   chart.timeScale().fitContent();
-    //   
-    //   // Force price scale to fit the new data range
-    //   try {
-    //     // Get price scale and reset its auto-scaling
-    //     const priceScale = chart.priceScale('right');
-    //     if (priceScale) {
-    //       // Force recalculation of price range
-    //       priceScale.applyOptions({
-    //         autoScale: true,
-    //         scaleMargins: {
-    //           top: 0.1,    // 10% margin at top
-    //           bottom: 0.1  // 10% margin at bottom
-    //         }
-    //       });
-    //     }
-    //     
-    //     // Additional method: use series price range if available
-    //     if (candlestickSeries && realData.length > 0) {
-    //       // Calculate min/max from actual data
-    //       const prices = realData.flatMap(d => [d.high, d.low]);
-    //       const minPrice = Math.min(...prices);
-    //       const maxPrice = Math.max(...prices);
-    //       
-    //       console.log(`Price range for ${symbol}: ${minPrice.toFixed(2)} - ${maxPrice.toFixed(2)}`);
-    //       
-    //       // Force visible range to match data range with margins
-    //       const margin = (maxPrice - minPrice) * 0.1; // 10% margin
-    //       try {
-    //         // Force price scale to auto-fit the new range
-    //         const priceScale = chart.priceScale('right');
-    //         if (priceScale) {
-    //           // Reset price scale options to force recalculation
-    //           priceScale.applyOptions({
-    //             autoScale: true,
-    //             scaleMargins: {
-    //               top: 0.1,
-    //               bottom: 0.1,
-    //             },
-    //           });
-    //         }
-    //         // Force time scale to fit content which triggers price scale recalculation
-    //         chart.timeScale().fitContent();
-    //       } catch (e) {
-    //         console.log('Using fallback price scale method:', e);
-    //         chart.timeScale().fitContent();
-    //       }
-    //     }
-    //   } catch (error) {
-    //     console.warn('Failed to reset price scale:', error);
-    //   }
-    // }
   }
 
   function updateTradeMarkers() {
@@ -1327,6 +1272,16 @@
     dispatch('intervalChanged', { symbol: selectedSymbol, interval: selectedInterval });
   }
 
+  // Symbol badges: available symbols from config store
+  $: availableSymbols = $configStore.availableSymbols;
+
+  // Handle symbol change from in-chart badges
+  function handleSymbolChange(newSymbol) {
+    selectedSymbol = newSymbol;
+    configStore.setSelectedSymbol(selectedSymbol);
+    dispatch('symbolChanged', { symbol: selectedSymbol, interval: selectedInterval });
+  }
+
 
   // 🚀 Liquidity Overlay Functions
   function initializeLiquidityOverlay_OLD() {
@@ -1455,6 +1410,21 @@
 </script>
 
 <div class="chart-container">
+  <!-- сюда перенеси symbols  -->
+  <div class="symbol-badges">
+    <label for="symbol-badges" class="symbol-label">Symbol</label>
+    <div class="badge-container" id="symbol-badges" role="group" aria-label="Select trading symbol">
+      {#each availableSymbols as sym}
+        <button
+          class="badge {selectedSymbol === sym ? 'badge-active' : 'badge-inactive'}"
+          on:click={() => handleSymbolChange(sym)}
+          disabled={loading}
+        >
+          {sym}
+        </button>
+      {/each}
+    </div>
+  </div>
   <!-- 📊 Interval Switcher - отдельная строка -->
   <div class="interval-switcher">
     {#each availableIntervals as interval}
@@ -1845,6 +1815,83 @@
   .icon {
     font-size: 1rem;
     filter: drop-shadow(0 1px 1px rgba(0,0,0,0.2));
+  }
+
+  /* Symbol badges styles */
+  .symbol-badges {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0 1rem;
+    margin-top: 0.5rem;
+  }
+
+  .symbol-label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #2c3e50;
+  }
+
+  .badge-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+  }
+
+  .badge {
+    padding: 0.375rem 0.75rem;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: white;
+    color: #333;
+    min-width: auto;
+    white-space: nowrap;
+  }
+
+  .badge:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+
+  .badge-active {
+    background: #3498db;
+    color: white;
+    border-color: #3498db;
+    box-shadow: 0 2px 4px rgba(52, 152, 219, 0.3);
+  }
+
+  .badge-active:hover:not(:disabled) {
+    background: #2980b9;
+    border-color: #2980b9;
+    box-shadow: 0 4px 8px rgba(52, 152, 219, 0.4);
+  }
+
+  .badge-inactive {
+    background: white;
+    color: #666;
+    border-color: #ddd;
+  }
+
+  .badge-inactive:hover:not(:disabled) {
+    background: #f8f9fa;
+    border-color: #bbb;
+    color: #333;
+  }
+
+  .badge:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .badge:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
   }
 
   /* 📊 Interval switcher styles */

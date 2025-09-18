@@ -45,21 +45,8 @@
 </script>
 
 <div class="controls">
-  <div class="control-group">
-    <label for="symbol-badges">Symbol</label>
-    <div class="badge-container" id="symbol-badges" role="group" aria-label="Select trading symbol">
-      {#each availableSymbols as symbol}
-        <button
-          class="badge {selectedSymbol === symbol ? 'badge-active' : 'badge-inactive'}"
-          on:click={() => handleSymbolChange(symbol)}
-          disabled={loading}
-        >
-          {symbol}
-        </button>
-      {/each}
-    </div>
-  </div>
-
+  
+  <!-- Removed symbol badges from header -->
 
   <div class="control-group">
     <button 
@@ -159,8 +146,7 @@
   .btn {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
+    gap: 0.25rem;
     padding: 0.5rem 1rem;
     border: 1px solid #ddd;
     border-radius: 4px;
@@ -168,20 +154,13 @@
     color: #333;
     text-decoration: none;
     font-size: 0.875rem;
-    font-weight: 500;
     cursor: pointer;
     transition: all 0.2s ease;
-    min-width: 120px;
   }
 
-  .btn:hover:not(:disabled) {
+  .btn:hover {
     background: #f5f5f5;
     border-color: #bbb;
-  }
-
-  .btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
   }
 
   .btn-primary {
@@ -190,54 +169,8 @@
     border-color: #3498db;
   }
 
-  .btn-primary:hover:not(:disabled) {
+  .btn-primary:hover {
     background: #2980b9;
     border-color: #2980b9;
-  }
-
-
-  /* Responsive design */
-  @media (max-width: 768px) {
-    .controls {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 0.75rem;
-    }
-
-    .control-group {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .control-group label {
-      margin-bottom: 0.5rem;
-      text-align: center;
-    }
-
-    .badge-container {
-      justify-content: center;
-      gap: 0.375rem;
-    }
-
-    .badge {
-      font-size: 0.8rem;
-      padding: 0.3rem 0.6rem;
-    }
-
-    .btn {
-      width: 100%;
-    }
-  }
-
-  /* Extra small screens */
-  @media (max-width: 480px) {
-    .badge-container {
-      gap: 0.25rem;
-    }
-
-    .badge {
-      font-size: 0.75rem;
-      padding: 0.25rem 0.5rem;
-    }
   }
 </style>

@@ -57,6 +57,10 @@ class OrderBookSnapshot(Base):
     def get_datetime_utc(self):
         """Convert timestamp to datetime object."""
         return datetime.utcfromtimestamp(self.timestamp / 1000)
+    
+    def get_datetime_local(self):
+        """Convert timestamp to local datetime object."""
+        return datetime.fromtimestamp(self.timestamp / 1000)
 
     def calculate_metrics(self):
         """Calculate and update derived metrics."""
@@ -75,7 +79,7 @@ class OrderBookSnapshot(Base):
             'symbol': self.symbol,
             'exchange': self.exchange,
             'timestamp': self.timestamp,
-            'datetime': self.get_datetime_utc().isoformat() if self.timestamp else None,
+            'datetime': self.get_datetime_local().isoformat() if self.timestamp else None,
             'best_bid': self.best_bid,
             'best_ask': self.best_ask,
             'spread': self.spread,
@@ -178,7 +182,7 @@ class LiquidityAggregation(Base):
             'exchange': self.exchange,
             'interval': self.interval,
             'timestamp': self.timestamp,
-            'datetime': datetime.utcfromtimestamp(self.timestamp / 1000).isoformat(),
+            'datetime': datetime.fromtimestamp(self.timestamp / 1000).isoformat(),
             'avg_spread': self.avg_spread,
             'min_spread': self.min_spread,
             'max_spread': self.max_spread,

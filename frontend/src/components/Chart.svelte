@@ -171,15 +171,17 @@
                 
                 const barSec = Math.floor(k.timestamp / 1000);
                 const last = candles && candles[candles.length - 1];
+                let isUpdate = false;
                 
                 if (last && Math.floor(new Date(last.timestamp).getTime() / 1000) === barSec) {
-                  // Update existing candle
+                  // Update existing candle - this is the key improvement!
                   console.log('📈 Updating existing candle');
                   last.open = k.open;
                   last.high = Math.max(last.high, k.high);
                   last.low = Math.min(last.low, k.low);
                   last.close = k.close;
                   last.volume = k.volume;
+                  isUpdate = true;
                 } else if (k.isClosed) {
                   // Add new closed candle
                   console.log('🆕 Adding new closed candle');
@@ -197,7 +199,9 @@
                     volume: k.volume,
                   }];
                 }
-                updateChart({ preserveViewport: true });
+                
+                // Use efficient real-time update for existing candle updates
+                updateChart({ preserveViewport: true, isRealtimeUpdate: isUpdate });
               } catch (e) {
                 console.error('Error processing live candle:', e);
               }
@@ -542,15 +546,17 @@
             
             const barSec = Math.floor(k.timestamp / 1000);
             const last = candles && candles[candles.length - 1];
+            let isUpdate = false;
             
             if (last && Math.floor(new Date(last.timestamp).getTime() / 1000) === barSec) {
-              // Update existing candle
+              // Update existing candle - this is the key improvement!
               console.log('📈 Updating existing candle');
               last.open = k.open;
               last.high = Math.max(last.high, k.high);
               last.low = Math.min(last.low, k.low);
               last.close = k.close;
               last.volume = k.volume;
+              isUpdate = true;
             } else if (k.isClosed) {
               // Add new closed candle
               console.log('🆕 Adding new closed candle');
@@ -568,7 +574,9 @@
                 volume: k.volume,
               }];
             }
-            updateChart({ preserveViewport: true });
+            
+            // Use efficient real-time update for existing candle updates
+            updateChart({ preserveViewport: true, isRealtimeUpdate: isUpdate });
           } catch (e) {
             console.error('Error processing live candle:', e);
           }
@@ -608,15 +616,17 @@
             
             const barSec = Math.floor(k.timestamp / 1000);
             const last = candles && candles[candles.length - 1];
+            let isUpdate = false;
             
             if (last && Math.floor(new Date(last.timestamp).getTime() / 1000) === barSec) {
-              // Update existing candle
+              // Update existing candle - this is the key improvement!
               console.log('📈 Updating existing candle');
               last.open = k.open;
               last.high = Math.max(last.high, k.high);
               last.low = Math.min(last.low, k.low);
               last.close = k.close;
               last.volume = k.volume;
+              isUpdate = true;
             } else if (k.isClosed) {
               // Add new closed candle
               console.log('🆕 Adding new closed candle');
@@ -634,7 +644,9 @@
                 volume: k.volume,
               }];
             }
-            updateChart({ preserveViewport: true });
+            
+            // Use efficient real-time update for existing candle updates
+            updateChart({ preserveViewport: true, isRealtimeUpdate: isUpdate });
           } catch (e) {
             console.error('Error processing live candle:', e);
           }
@@ -836,7 +848,7 @@
     }
   }
 
-  function updateChart({ preserveViewport = true } = {}) { // TEMPORARILY CHANGED: was false
+  function updateChart({ preserveViewport = true, isRealtimeUpdate = false } = {}) {
     if (!candlestickSeries) return;
 
     // Convert candles to chart format (real data only)
@@ -851,6 +863,15 @@
     // Update backfill cursor to oldest candle
     backfillCursor = candles && candles.length ? candles[0].timestamp : backfillCursor;
 
+    // For real-time updates, use series.update() for better performance
+    if (isRealtimeUpdate && realData.length > 0) {
+      const lastCandle = realData[realData.length - 1];
+      console.log('🔄 Real-time update:', lastCandle);
+      candlestickSeries.update(lastCandle);
+      return;
+    }
+
+    // For initial load or full refresh, use setData()
     // Combine real data with placeholders for seamless chart display
     // Use the oldest real candle's open price for placeholders to maintain visual continuity
     const oldestPrice = realData.length > 0 ? realData[0].open : 0;
@@ -875,8 +896,8 @@
 
     // Update candlestick series without changing viewport
     candlestickSeries.setData(chartData);
-
   }
+
 
   function updateTradeMarkers() {
     if (!candlestickSeries || !trades.length) return;

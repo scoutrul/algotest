@@ -5,7 +5,7 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     container_name: backtest-backend-dev
     restart: unless-stopped
     ports:
@@ -17,10 +17,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_DB=0
-    volumes:
-      - ./backend:/app
-      - /app/__pycache__
-      - /app/.pytest_cache
+      - TZ=Asia/Almaty
     networks:
       - backtest-dev-network
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -61,10 +58,7 @@ services:
       - "5173:5173"
     environment:
       - NODE_ENV=development
-      - VITE_API_BASE_URL=http://backend:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - VITE_API_BASE_URL=http://localhost:8000
     networks:
       - backtest-dev-network
     command: npm run dev -- --host 0.0.0.0

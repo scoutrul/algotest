@@ -92,7 +92,7 @@ async def get_current_orderbook(
         return {
             "symbol": symbol,
             "timestamp": snapshot.timestamp,
-            "datetime": snapshot.get_datetime_utc().isoformat(),
+            "datetime": snapshot.get_datetime_local().isoformat(),
             "exchange": snapshot.exchange,
             "best_bid": snapshot.best_bid,
             "best_ask": snapshot.best_ask,
@@ -378,7 +378,7 @@ async def get_available_symbols(db: Session = Depends(get_db)):
                 "configured": symbol in configured_symbols,
                 "has_data": symbol in db_symbols,
                 "latest_timestamp": latest_snapshot.timestamp if latest_snapshot else None,
-                "latest_datetime": latest_snapshot.get_datetime_utc().isoformat() if latest_snapshot else None
+                "latest_datetime": latest_snapshot.get_datetime_local().isoformat() if latest_snapshot else None
             })
         
         return {
@@ -448,7 +448,7 @@ def _aggregate_snapshots(snapshots: List[OrderBookSnapshot], bucket_timestamp: i
     return {
         "time": int(bucket_timestamp / 1000),  # Convert to seconds for Lightweight Charts
         "timestamp": bucket_timestamp,
-        "datetime": datetime.utcfromtimestamp(bucket_timestamp / 1000).isoformat(),
+        "datetime": datetime.fromtimestamp(bucket_timestamp / 1000).isoformat(),
         "symbol": latest_snapshot.symbol,
         "snapshots_count": len(snapshots),
         "avg_spread": sum(spreads) / len(spreads) if spreads else None,

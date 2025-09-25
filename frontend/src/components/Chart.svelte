@@ -147,6 +147,14 @@
           lastSymbol = symbol;
           lastInterval = interval;
           
+          // 📊 Auto-switch autoScale after reinitialization
+          setTimeout(() => {
+            if (chart) {
+              console.log('📊 Auto-switching autoScale from true to false after reinitialization');
+              setAutoScale(false);
+            }
+          }, 2000); // Wait 2 seconds after chart creation
+          
           // Setup backfill after chart is created
           setupBackfill();
           
@@ -231,6 +239,30 @@
   function forcePriceScaleReset() {
     // Just call the full reinitialize now
     reinitializeChart();
+  }
+
+  // 📊 Function to set specific autoScale value
+  function setAutoScale(enabled) {
+    if (!chart) return false;
+    
+    try {
+      // Get current price scale options
+      const currentOptions = chart.options().rightPriceScale || {};
+      
+      // Apply new autoScale setting
+      chart.applyOptions({
+        rightPriceScale: {
+          ...currentOptions,
+          autoScale: enabled
+        }
+      });
+      
+      console.log(`📊 AutoScale set to ${enabled ? 'enabled' : 'disabled'} for price scale`);
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to set autoScale:', error);
+      return false;
+    }
   }
 
   // 🚀 Liquidity Overlay Functions
@@ -404,7 +436,7 @@
            try {
              const priceLine = candlestickSeries.createPriceLine({
                price: level.price,
-               color: `rgba(76, 175, 80, ${alpha})`,
+               color: `rgba(33, 150, 243, ${alpha})`, // Синий для bid уровней
                lineWidth: lw,
                lineStyle: 0,
                axisLabelVisible: false,
@@ -425,7 +457,7 @@
            try {
              const priceLine = candlestickSeries.createPriceLine({
                price: level.price,
-               color: `rgba(244, 67, 54, ${alpha})`,
+               color: `rgba(156, 39, 176, ${alpha})`, // Фиолетовый для ask уровней
                lineWidth: lw,
                lineStyle: 0,
                axisLabelVisible: false,
@@ -710,10 +742,10 @@
       },
       rightPriceScale: {
         borderColor: '#cccccc',
-        autoScale: false,
+        autoScale: true,
         scaleMargins: {
-          top: 0.1,
-          bottom: 0.1,
+          top: 0.2,
+          bottom: 0.2,
         },
         // 4 decimal digits on axis
         entireTextOnly: false,
@@ -792,6 +824,15 @@
     // Set tracking variables after chart is created
     prevInterval = interval;
     prevSymbol = symbol;
+    
+    // 📊 Auto-switch autoScale after initial load
+    // Start with autoScale: true to fit all data, then switch to false for user control
+    setTimeout(() => {
+      if (chart) {
+        console.log('📊 Auto-switching autoScale from true to false for user control');
+        setAutoScale(false);
+      }
+    }, 2000); // Wait 2 seconds after chart creation
   }
 
   function setupResizeObserver() {
